@@ -20,7 +20,7 @@
       },
       {
         "title": "A build for each release",
-        "text": "Desktop and server packages are published from CI and listed on the download page."
+        "text": "Deb, rpm, apt, and Homebrew packages are published from the core release."
       }
     ],
     "shots": [
@@ -48,9 +48,9 @@
   },
   "download": {
     "title": "Download",
-    "description": "Download the latest Yggdrasil desktop and server builds published by CI.",
-    "intro": "These files are the builds CI publishes to the public core repository. A new tag replaces this list within a few minutes.",
-    "empty": "No release packages are listed right now.",
+    "description": "Install Yggdrasil core with Homebrew, apt, deb, or rpm.",
+    "intro": "These are the core packages. macOS installs with Homebrew. Debian and Ubuntu install with apt. RPM packages are on the release.",
+    "empty": "No core packages are listed right now.",
     "issuesPrompt": "Found a bug or want something added?"
   }
 }

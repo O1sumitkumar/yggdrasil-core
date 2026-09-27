@@ -1,0 +1,332 @@
+package screenshot
+
+import (
+	"fmt"
+	"net/http"
+	"strings"
+)
+
+func serveScreenshotAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodHead {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	path := r.URL.Path
+	if path == "/api/v1/events" || strings.HasPrefix(path, "/api/v1/events/") {
+		serveScreenshotEvents(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusOK, `{}`)
+		return
+	}
+	if body, ok := screenshotGET(path); ok {
+		writeJSON(w, http.StatusOK, body)
+		return
+	}
+	writeJSON(w, http.StatusOK, `[]`)
+}
+
+func serveScreenshotEvents(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprint(w, ": screenshot\n\n")
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+	<-r.Context().Done()
+}
+
+func writeJSON(w http.ResponseWriter, status int, body string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write([]byte(body))
+}
+
+func screenshotGET(path string) (string, bool) {
+	switch {
+	case path == "/api/v1/health":
+		return `{"status":"ok","product":"Yggdrasil","version":"0.1.0"}`, true
+	case path == "/api/v1/version":
+		return `{"version":"0.1.0","commit":"screenshot","build_date":"2026-09-24T00:00:00Z","product":"Yggdrasil"}`, true
+	case path == "/api/v1/hardware":
+		return screenshotHardware, true
+	case path == "/api/v1/models":
+		return screenshotModels, true
+	case path == "/api/v1/models/fit":
+		return screenshotModelFit, true
+	case path == "/api/v1/models/running":
+		return screenshotRunning, true
+	case strings.HasPrefix(path, "/api/v1/models/browse"):
+		return `[]`, true
+	case strings.HasPrefix(path, "/api/v1/models/recommend"):
+		return `{"purpose":"general","roles":[],"models":[],"reason":"","estimated_storage_bytes":0,"estimated_vram_bytes":0}`, true
+	case path == "/api/v1/profiles":
+		return screenshotProfiles, true
+	case path == "/api/v1/nodes":
+		return screenshotNodes, true
+	case path == "/api/v1/nodes/pairing/pending":
+		return `[]`, true
+	case path == "/api/v1/settings":
+		return screenshotSettings, true
+	case path == "/api/v1/conversations":
+		return screenshotConversations, true
+	case strings.HasPrefix(path, "/api/v1/conversations/") && strings.HasSuffix(path, "/messages"):
+		return screenshotMessages, true
+	case path == "/api/v1/api-keys":
+		return screenshotAPIKeys, true
+	case path == "/api/v1/runtimes":
+		return screenshotRuntimes, true
+	case path == "/api/v1/logs":
+		return screenshotLogs, true
+	case strings.HasPrefix(path, "/api/v1/logs/"):
+		return screenshotLogBody, true
+	case strings.HasPrefix(path, "/api/v1/performance"):
+		return screenshotPerformance, true
+	case path == "/api/v1/tasks":
+		return `[]`, true
+	case path == "/api/v1/benchmarks":
+		return `[]`, true
+	case path == "/api/v1/benchmarks/workloads":
+		return `[]`, true
+	case path == "/v1/models":
+		return `{"object":"list","data":[{"id":"gemma-4-e4b","object":"model"}]}`, true
+	default:
+		return "", false
+	}
+}
+
+const screenshotHardware = `{
+  "os": "darwin",
+  "arch": "arm64",
+  "hostname": "studio",
+  "cpu": {"model": "Apple M4 Pro", "cores": 14, "threads": 14},
+  "memory": {"total_bytes": 51539607552, "available_bytes": 34359738368},
+  "disk": {"path": "/", "total_bytes": 1000000000000, "available_bytes": 640000000000},
+  "accelerators": [{
+    "id": "gpu0",
+    "vendor": "Apple",
+    "model": "M4 Pro",
+    "kind": "integrated",
+    "unified_memory_bytes": 51539607552,
+    "backends": ["metal"]
+  }],
+  "detected_at": "2026-09-24T12:00:00Z"
+}`
+
+const screenshotModels = `[
+  {
+    "id": "gemma-4-e4b",
+    "display_name": "Gemma 4 E4B",
+    "summary": "General assistant that fits on this Mac.",
+    "family": "Gemma",
+    "parameters": "4B",
+    "size_bytes": 3200000000,
+    "memory_needed_bytes": 4500000000,
+    "context": 8192,
+    "capabilities": {"tool_calling": true, "vision": false, "coding": true},
+    "purpose": ["general", "coding"],
+    "installed": true,
+    "installed_on": [{"node_id": "local", "node_name": "This Mac"}],
+    "status": "ready",
+    "runtime": ["llamacpp"]
+  },
+  {
+    "id": "qwen-coder-7b",
+    "display_name": "Qwen Coder 7B",
+    "summary": "Coding model installed on the studio Mac.",
+    "family": "Qwen",
+    "parameters": "7B",
+    "size_bytes": 4800000000,
+    "memory_needed_bytes": 7000000000,
+    "context": 32768,
+    "capabilities": {"tool_calling": true, "vision": false, "coding": true},
+    "purpose": ["coding"],
+    "installed": true,
+    "installed_on": [{"node_id": "studio", "node_name": "Studio"}],
+    "status": "ready",
+    "runtime": ["llamacpp"]
+  }
+]`
+
+const screenshotModelFit = `[{
+  "node_id": "local",
+  "node_name": "This Mac",
+  "memory_bytes": 51539607552,
+  "fits": [{
+    "model_id": "gemma-4-e4b",
+    "node_id": "local",
+    "node_name": "This Mac",
+    "label": "excellent",
+    "expected_memory_bytes": 4500000000,
+    "reason": "Fits comfortably in unified memory.",
+    "est_tok_per_sec": 62
+  }],
+  "winners": [{"category": "general", "label": "Best overall", "model_id": "gemma-4-e4b"}]
+}]`
+
+const screenshotRunning = `[{
+  "model_id": "gemma-4-e4b",
+  "display_name": "Gemma 4 E4B",
+  "instance_id": "run-1",
+  "node_id": "local",
+  "node_name": "This Mac",
+  "status": "running",
+  "memory_bytes": 4500000000,
+  "speed_tok_per_sec": 58,
+  "accelerator": "Apple M4 Pro",
+  "used_by_profiles": ["General"]
+}]`
+
+const screenshotProfiles = `[{
+  "id": "general-assistant",
+  "name": "General",
+  "purpose": "general",
+  "orchestrator_id": "simple",
+  "roles": [{"role": "assistant", "model_id": "gemma-4-e4b", "node_id": "local", "required": true}],
+  "node_policy": {"mode": "prefer_local"},
+  "tools": []
+}]`
+
+const screenshotNodes = `[
+  {
+    "id": "local",
+    "name": "This Mac",
+    "os": "darwin",
+    "arch": "arm64",
+    "status": "online",
+    "is_local": true,
+    "paired": true,
+    "address": "127.0.0.1:7331",
+    "hardware": {
+      "os": "darwin",
+      "arch": "arm64",
+      "cpu": {"model": "Apple M4 Pro", "cores": 14},
+      "memory": {"total_bytes": 51539607552, "available_bytes": 34359738368},
+      "disk": {"path": "/", "total_bytes": 1000000000000, "available_bytes": 640000000000},
+      "accelerators": [{"id": "gpu0", "vendor": "Apple", "model": "M4 Pro", "kind": "integrated", "unified_memory_bytes": 51539607552}]
+    }
+  },
+  {
+    "id": "studio",
+    "name": "Studio",
+    "os": "darwin",
+    "arch": "arm64",
+    "status": "online",
+    "is_local": false,
+    "paired": true,
+    "address": "192.168.1.42:7331",
+    "hardware": {
+      "os": "darwin",
+      "arch": "arm64",
+      "cpu": {"model": "Apple M2 Max", "cores": 12},
+      "memory": {"total_bytes": 68719476736, "available_bytes": 45097156608},
+      "disk": {"path": "/", "total_bytes": 2000000000000, "available_bytes": 900000000000},
+      "accelerators": [{"id": "gpu0", "vendor": "Apple", "model": "M2 Max", "kind": "integrated", "unified_memory_bytes": 68719476736}]
+    }
+  }
+]`
+
+const screenshotSettings = `{
+  "data_dir": "/Users/demo/Library/Application Support/Yggdrasil",
+  "models_dir": "/Users/demo/Library/Application Support/Yggdrasil/models",
+  "runtimes_dir": "/Users/demo/Library/Application Support/Yggdrasil/runtimes",
+  "logs_dir": "/Users/demo/Library/Application Support/Yggdrasil/logs",
+  "api_host": "127.0.0.1",
+  "api_port": 7331,
+  "lan_api_enabled": false,
+  "web_ui_enabled": true,
+  "discovery_enabled": true,
+  "node_name": "This Mac",
+  "node_id": "local",
+  "advanced_mode": true,
+  "model_lifecycle": "automatic",
+  "idle_unload_minutes": 15,
+  "keep_running_in_background": true,
+  "default_profile_id": "general-assistant",
+  "default_execution": "automatic",
+  "download_behavior": "ask",
+  "model_storage_limit_gb": 50,
+  "save_chat_history": true,
+  "save_task_history": true,
+  "notify_task_finish": true,
+  "notify_peer_offline": true,
+  "launch_at_login": false
+}`
+
+const screenshotConversations = `[{
+  "id": "conv-local",
+  "title": "Plan a weekend trail loop",
+  "profile_id": "general-assistant",
+  "model_id": "gemma-4-e4b",
+  "created_at": "2026-09-24T15:00:00Z",
+  "updated_at": "2026-09-24T15:04:00Z"
+}]`
+
+const screenshotMessages = `[
+  {
+    "id": "m1",
+    "conversation_id": "conv-local",
+    "role": "user",
+    "content": "Suggest a half-day hike near the city that stays off the busiest trails.",
+    "created_at": "2026-09-24T15:01:00Z"
+  },
+  {
+    "id": "m2",
+    "conversation_id": "conv-local",
+    "role": "assistant",
+    "content": "Take the ridge above the reservoir. It is about 6 miles, stays in the trees for the first hour, and the viewpoint is usually quiet by late morning. Pack water; there is no faucet after the trailhead.",
+    "created_at": "2026-09-24T15:01:20Z"
+  }
+]`
+
+const screenshotAPIKeys = `[
+  {"id": "key-1", "name": "Editor", "prefix": "ygk_3f91", "created_at": "2026-09-01T00:00:00Z", "last_used_at": "2026-09-24T14:00:00Z", "revoked": false},
+  {"id": "key-2", "name": "Notes app", "prefix": "ygk_88ab", "created_at": "2026-08-12T00:00:00Z", "revoked": false}
+]`
+
+const screenshotRuntimes = `[{
+  "id": "llamacpp",
+  "display_name": "llama.cpp (llama-server)",
+  "status": "ready",
+  "detection": {"installed": true, "version": "b11174", "path": "Contents/MacOS/llamacpp/llama-server"}
+}]`
+
+const screenshotLogs = `[{
+  "name": "daemon.log",
+  "kind": "daemon",
+  "size_bytes": 4096,
+  "modified_at": "2026-09-24T15:04:00Z",
+  "label": "Service"
+}]`
+
+const screenshotLogBody = `{
+  "name": "daemon.log",
+  "kind": "daemon",
+  "label": "Service",
+  "content": "2026-09-24T15:04:00Z service ready on 127.0.0.1:7331\n2026-09-24T15:04:02Z model gemma-4-e4b running on This Mac\n",
+  "truncated": false,
+  "size_bytes": 128
+}`
+
+const screenshotPerformance = `[{
+  "id": "gen-1",
+  "conversation_id": "conv-local",
+  "conversation_title": "Plan a weekend trail loop",
+  "profile_name": "General",
+  "model_id": "gemma-4-e4b",
+  "runtime_id": "llamacpp",
+  "prompt_tokens": 42,
+  "completion_tokens": 68,
+  "total_tokens": 110,
+  "ttft_ms": 180,
+  "prompt_ms": 90,
+  "eval_ms": 1100,
+  "total_ms": 1280,
+  "prompt_tok_per_sec": 466,
+  "eval_tok_per_sec": 61.8,
+  "cross_machine": false,
+  "node_count": 1,
+  "created_at": "2026-09-24T15:01:20Z"
+}]`

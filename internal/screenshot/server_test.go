@@ -1,0 +1,49 @@
+package screenshot
+
+import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"testing/fstest"
+)
+
+func TestHandlerDemoAPIAndUI(t *testing.T) {
+	web := fstest.MapFS{
+		"index.html":    &fstest.MapFile{Data: []byte("<!doctype html><title>ui</title>")},
+		"assets/app.js": &fstest.MapFile{Data: []byte("console.log(1)")},
+	}
+	server := httptest.NewServer(Handler(web))
+	t.Cleanup(server.Close)
+
+	health, err := http.Get(server.URL + "/api/v1/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(health.Body)
+	health.Body.Close()
+	if health.StatusCode != http.StatusOK || !strings.Contains(string(body), `"status":"ok"`) {
+		t.Fatalf("health: %d %s", health.StatusCode, body)
+	}
+
+	page, err := http.Get(server.URL + "/chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pageBody, _ := io.ReadAll(page.Body)
+	page.Body.Close()
+	if !strings.Contains(string(pageBody), "<title>ui</title>") {
+		t.Fatalf("spa fallback: %s", pageBody)
+	}
+
+	asset, err := http.Get(server.URL + "/assets/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assetBody, _ := io.ReadAll(asset.Body)
+	asset.Body.Close()
+	if string(assetBody) != "console.log(1)" {
+		t.Fatalf("asset: %s", assetBody)
+	}
+}

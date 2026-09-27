@@ -1,4 +1,4 @@
-.PHONY: all tidy test vet fmt frontend daemon ci test-cluster package-headless run-daemon run-web
+.PHONY: all tidy test vet fmt frontend daemon ci test-cluster package-headless run-daemon run-web screenshots
 
 all: tidy test frontend
 
@@ -39,3 +39,7 @@ package-headless:
 	./scripts/build/package-headless.sh
 
 ci: fmt vet test frontend
+
+screenshots:
+	chmod +x scripts/capture-screenshots.sh
+	./scripts/capture-screenshots.sh

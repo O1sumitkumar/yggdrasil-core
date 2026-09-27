@@ -1,0 +1,51 @@
+{
+  "window": { "width": 1440, "height": 900 },
+  "overlays": false,
+  "background": "#121C26",
+  "dimensions": ["2880x1800", "2560x1600"],
+  "screens": [
+    {
+      "id": "chat",
+      "path": "/chat",
+      "query": "c=conv-local",
+      "filename": "01-chat.png",
+      "headline": "Run Local AI Models",
+      "readyText": "ridge above the reservoir"
+    },
+    {
+      "id": "models",
+      "path": "/models",
+      "filename": "02-models.png",
+      "headline": "Manage Every Model",
+      "readyText": "Gemma 4 E4B"
+    },
+    {
+      "id": "computers",
+      "path": "/nodes",
+      "filename": "03-computers.png",
+      "headline": "Build Multi-Machine AI Clusters",
+      "readyText": "Studio"
+    },
+    {
+      "id": "performance",
+      "path": "/performance",
+      "filename": "04-performance.png",
+      "headline": "Benchmark Model Performance",
+      "readyText": "What your AI is doing right now"
+    },
+    {
+      "id": "diagnostics",
+      "path": "/diagnostics",
+      "filename": "05-diagnostics.png",
+      "headline": "Understand Your AI Hardware",
+      "readyText": "All systems operational"
+    },
+    {
+      "id": "api-manager",
+      "path": "/api-access",
+      "filename": "06-api-manager.png",
+      "headline": "Manage Local AI APIs",
+      "readyText": "API keys"
+    }
+  ]
+}

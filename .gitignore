@@ -23,8 +23,7 @@ package-lock.json
 # Brand pipeline temp
 assets/brand/generated/.tmp-iconset.iconset/
 
-# App Store screenshot outputs (config stays)
-screenshots/raw/
+# Letterboxed screenshot canvases (the README copies in docs/screenshots stay)
 screenshots/appstore/
 
 # IDE / OS

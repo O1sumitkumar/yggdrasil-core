@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# Build the core release artifacts: Linux deb and rpm, plus macOS archives for Homebrew.
+# Usage: VERSION=1.1.0-beta.3 ./scripts/build/package-core-release.sh
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$ROOT"
+
+VERSION="${VERSION:-0.1.0-dev}"
+# Debian revision treats "-" as the package revision separator.
+PKG_VERSION="${VERSION/-/~}"
+COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+LDFLAGS="-X github.com/yeixio/yggdrasil-core/internal/version.Version=${VERSION} -X github.com/yeixio/yggdrasil-core/internal/version.Commit=${COMMIT} -X github.com/yeixio/yggdrasil-core/internal/version.BuildDate=${DATE}"
+
+if ! command -v nfpm >/dev/null 2>&1; then
+  echo "nfpm is required. Install it with: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.41.3" >&2
+  exit 1
+fi
+
+if [[ ! -f web/dist/index.html ]]; then
+  (cd web && pnpm install --frozen-lockfile && pnpm build)
+fi
+
+chmod +x packaging/linux/postinstall.sh packaging/linux/preremove.sh
+rm -rf dist
+mkdir -p dist
+
+build_binaries() {
+  local goos="$1" goarch="$2" dest="$3"
+  mkdir -p "$dest/web"
+  echo "Building ${goos}/${goarch}"
+  CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags "$LDFLAGS" \
+    -o "$dest/yggdrasil-daemon" ./cmd/daemon
+  CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags "$LDFLAGS" \
+    -o "$dest/yggctl" ./cmd/devctl
+  cp -R web/dist/. "$dest/web/"
+}
+
+package_linux() {
+  local goarch="$1" debarch="$2" rpmarch="$3"
+  local stage="dist/stage-${debarch}"
+  build_binaries linux "$goarch" "$stage"
+  local cfg
+  cfg="$(mktemp)"
+  cat > "$cfg" <<EOF
+name: yggdrasil
+arch: ${debarch}
+platform: linux
+version: ${PKG_VERSION}
+maintainer: YEIXIO LLC <hello@yeix.io>
+description: Local AI daemon and web UI
+homepage: https://yggdrasil.yeix.io
+license: AGPL-3.0-or-later
+contents:
+  - src: ${ROOT}/${stage}/yggdrasil-daemon
+    dst: /usr/bin/yggdrasil-daemon
+    file_info:
+      mode: 0755
+  - src: ${ROOT}/${stage}/yggctl
+    dst: /usr/bin/yggctl
+    file_info:
+      mode: 0755
+  - src: ${ROOT}/${stage}/web
+    dst: /usr/share/yggdrasil/web
+    type: tree
+  - src: ${ROOT}/packaging/linux/yggdrasil.service
+    dst: /usr/lib/systemd/system/yggdrasil.service
+scripts:
+  postinstall: ${ROOT}/packaging/linux/postinstall.sh
+  preremove: ${ROOT}/packaging/linux/preremove.sh
+rpm:
+  arch: ${rpmarch}
+EOF
+  nfpm package -p deb -f "$cfg" -t "dist/yggdrasil_${PKG_VERSION}_${debarch}.deb"
+  nfpm package -p rpm -f "$cfg" -t "dist/yggdrasil-${PKG_VERSION}-1.${rpmarch}.rpm"
+  rm -f "$cfg"
+  rm -rf "$stage"
+}
+
+package_darwin() {
+  local goarch="$1"
+  local name="yggdrasil-${VERSION}-darwin-${goarch}-headless"
+  local stage="dist/${name}"
+  build_binaries darwin "$goarch" "$stage"
+  tar -C dist -czf "dist/${name}.tar.gz" "$name"
+  rm -rf "$stage"
+}
+
+package_linux amd64 amd64 x86_64
+package_linux arm64 arm64 aarch64
+package_darwin arm64
+package_darwin amd64
+
+(
+  cd dist
+  : > SHA256SUMS.txt
+  for file in *.deb *.rpm *.tar.gz; do
+    if command -v sha256sum >/dev/null 2>&1; then
+      hash="$(sha256sum "$file" | awk '{print $1}')"
+    else
+      hash="$(shasum -a 256 "$file" | awk '{print $1}')"
+    fi
+    printf '%s  %s\n' "$hash" "$file" >> SHA256SUMS.txt
+  done
+)
+echo "Core packages are in dist/"
+ls -lh dist

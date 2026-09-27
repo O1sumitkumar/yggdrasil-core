@@ -1,57 +1,20 @@
-# Linux packaging
+# Linux packages
 
-## Headless (recommended for servers)
-
-Built by CI as `yggdrasil-<version>-linux-<arch>-headless.tar.gz`.
+Release CI builds a `.deb` and `.rpm` for amd64 and arm64, and publishes an unsigned apt repository on the `apt` branch.
 
 ```bash
-VERSION=0.1.0 GOOS=linux GOARCH=amd64 ./scripts/build/package-headless.sh
+echo "deb [trusted=yes] https://raw.githubusercontent.com/yeixio/yggdrasil-core/apt stable main" | sudo tee /etc/apt/sources.list.d/yggdrasil.list
+sudo apt-get update
+sudo apt-get install yggdrasil
 ```
 
-Contains:
+Each package installs:
 
-- `yggdrasil-daemon`
-- `yggctl`
-- `web/` (served by the daemon)
+- `/usr/bin/yggdrasil-daemon`
+- `/usr/bin/yggctl`
+- `/usr/share/yggdrasil/web`
+- a systemd service, `yggdrasil.service`
 
-```bash
-./yggdrasil-daemon
-# open http://127.0.0.1:7331
-```
+Open `http://127.0.0.1:7331` after the service starts.
 
-Optional LAN bind:
-
-```bash
-YGGDRASIL_API_HOST=0.0.0.0 ./yggdrasil-daemon
-```
-
-## Desktop (GTK / WebKit)
-
-Built by CI on Ubuntu with Wails:
-
-```bash
-VERSION=0.1.0 ./scripts/build/package-desktop.sh
-```
-
-Requires `libgtk-3-dev` and `libwebkit2gtk-4.1-dev`.
-
-On Ubuntu 24.04+, the script passes `-tags webkit2_41` so Wails links
-against webkit2gtk 4.1 (4.0 is unavailable).
-
-## Icons (hicolor)
-
-Canonical icons live under `assets/brand/generated/linux/<SIZE>x<SIZE>/apps/yggdrasil.png`
-(regenerate with `pnpm icons`). Desktop entry: `packaging/linux/yggdrasil.desktop`
-with `Icon=yggdrasil` (no absolute path).
-
-Install layout for packages / AppImage:
-
-```text
-/usr/share/icons/hicolor/<SIZE>x<SIZE>/apps/yggdrasil.png
-/usr/share/applications/yggdrasil.desktop
-```
-
-## Future
-
-- `.deb` / `.rpm` / AppImage wrappers around the headless or desktop layouts
-- systemd user unit for headless daemon mode
+Build the packages locally with `VERSION=1.1.0 ./scripts/build/package-core-release.sh`. That also writes the macOS archives used by the Homebrew formula.

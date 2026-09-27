@@ -6,6 +6,46 @@ The daemon runs on this computer, serves the web UI, installs local models, and 
 
 Copyright (C) 2026 YEIXIO LLC. Licensed under the GNU Affero General Public License, version 3 or any later version. See [LICENSE](./LICENSE).
 
+## Install
+
+A release tag publishes packages to [GitHub Releases](https://github.com/yeixio/yggdrasil-core/releases).
+
+macOS:
+
+```bash
+brew tap yeixio/yggdrasil https://github.com/yeixio/yggdrasil-core
+brew install yggdrasil
+```
+
+Debian and Ubuntu. The apt repository is the `apt` branch of this repository:
+
+```bash
+echo "deb [trusted=yes] https://raw.githubusercontent.com/yeixio/yggdrasil-core/apt stable main" | sudo tee /etc/apt/sources.list.d/yggdrasil.list
+sudo apt-get update
+sudo apt-get install yggdrasil
+```
+
+RPM packages for x86_64 and aarch64 are attached to the same release:
+
+```bash
+sudo dnf install ./yggdrasil-*.rpm
+```
+
+The packages install `yggdrasil-daemon` and the web UI, and start a systemd service on Linux. Open `http://127.0.0.1:7331`.
+
+## The interface
+
+These screens are the web UI the daemon serves at `http://127.0.0.1:7331`. `make screenshots` recaptures them from demo data; it does not start a model.
+
+| | |
+| --- | --- |
+| <img src="docs/screenshots/01-chat.png" alt="Chat with a local model" width="420"> | <img src="docs/screenshots/02-models.png" alt="Installed models that fit this computer" width="420"> |
+| Chat | Models |
+| <img src="docs/screenshots/03-computers.png" alt="This Mac paired with a second computer" width="420"> | <img src="docs/screenshots/04-performance.png" alt="Performance of the connected computers" width="420"> |
+| Computers | Performance |
+| <img src="docs/screenshots/05-diagnostics.png" alt="Diagnostics showing the local service is healthy" width="420"> | <img src="docs/screenshots/06-api-manager.png" alt="Local API access and API keys" width="420"> |
+| Diagnostics | API access |
+
 ## Run it
 
 Requirements: Go 1.26+, Node 22+, pnpm 9+.

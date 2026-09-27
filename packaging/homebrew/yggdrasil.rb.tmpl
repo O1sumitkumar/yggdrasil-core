@@ -1,0 +1,32 @@
+# Homebrew formula written by the core release workflow.
+class Yggdrasil < Formula
+  desc "Local AI daemon and web UI"
+  homepage "https://yggdrasil.yeix.io"
+  version "VERSION"
+  license "AGPL-3.0-or-later"
+
+  on_arm do
+    url "https://github.com/yeixio/yggdrasil-core/releases/download/TAG/yggdrasil-VERSION-darwin-arm64-headless.tar.gz"
+    sha256 "ARM64_SHA"
+  end
+
+  on_intel do
+    url "https://github.com/yeixio/yggdrasil-core/releases/download/TAG/yggdrasil-VERSION-darwin-amd64-headless.tar.gz"
+    sha256 "AMD64_SHA"
+  end
+
+  def install
+    bin.install "yggdrasil-daemon"
+    bin.install "yggctl"
+    (share/"yggdrasil").install "web"
+  end
+
+  def caveats
+    <<~EOS
+      Start the daemon, then open the web UI:
+
+        yggdrasil-daemon
+        open http://127.0.0.1:7331
+    EOS
+  end
+end
