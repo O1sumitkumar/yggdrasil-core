@@ -1,4 +1,48 @@
+# Release archives belong on GitHub Releases, not in the tree.
 *.zip
 *.tar.gz
 *.pkg
 SHA256SUMS.txt
+
+# Binaries
+/bin/
+/dist/
+.ygg-dev-data/
+.gocache/
+
+# Frontend
+web/node_modules/
+web/dist/
+desktop/frontend/dist/
+# Wails local build products (icons are regenerated into here by `pnpm icons`)
+desktop/build/
+.pnpm-store/
+node_modules/
+package-lock.json
+
+# Brand pipeline temp
+assets/brand/generated/.tmp-iconset.iconset/
+
+# App Store screenshot outputs (config stays)
+screenshots/raw/
+screenshots/appstore/
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local env / secrets
+.env
+.env.*
+*.pem
+*.key
+*.p8
+
+# Go
+coverage.out
+*.test
+
+# Wails
+desktop/node_modules/

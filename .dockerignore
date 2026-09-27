@@ -1,0 +1,12 @@
+.git
+.gocache
+bin
+dist
+web/node_modules
+web/dist
+desktop
+.pnpm-store
+**/*_test.go
+.ygg-dev-data
+*.md
+.cursor

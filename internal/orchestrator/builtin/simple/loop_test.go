@@ -1,0 +1,286 @@
+package simple
+
+import (
+	"context"
+	"errors"
+	"net/url"
+	"strings"
+	"testing"
+
+	"github.com/yeixio/yggdrasil-core/pkg/contracts"
+	"github.com/yeixio/yggdrasil-core/pkg/pluginapi"
+)
+
+type scriptedEnv struct {
+	replies []string
+	n       int
+	tools   int
+	seen    [][]pluginapi.ChatMessage
+}
+
+func (e *scriptedEnv) Generate(ctx context.Context, role string, messages []pluginapi.ChatMessage) (<-chan pluginapi.ChatChunk, error) {
+	content := "done"
+	if e.n < len(e.replies) {
+		content = e.replies[e.n]
+		e.n++
+	}
+	copied := append([]pluginapi.ChatMessage(nil), messages...)
+	e.seen = append(e.seen, copied)
+	ch := make(chan pluginapi.ChatChunk, 1)
+	ch <- pluginapi.ChatChunk{Content: content, Done: true}
+	close(ch)
+	return ch, nil
+}
+
+func (e *scriptedEnv) ExecuteTool(ctx context.Context, toolID string, args map[string]any) (map[string]any, error) {
+	e.tools++
+	return map[string]any{"ok": true, "tool": toolID}, nil
+}
+
+func (e *scriptedEnv) Emit(eventType string, payload map[string]any) {}
+
+func (e *scriptedEnv) NodeForRole(role string) (string, error) { return "local", nil }
+
+type failingEnv struct {
+	scriptedEnv
+}
+
+func (e *failingEnv) ExecuteTool(ctx context.Context, toolID string, args map[string]any) (map[string]any, error) {
+	e.tools++
+	return nil, errors.New("stack dump must not reach chat")
+}
+
+func TestToolLoopRunsSearchThenAnswers(t *testing.T) {
+	env := &scriptedEnv{replies: []string{
+		`{"tool_call":{"id":"internet.search","args":{"query":"Juneau weather"}}}`,
+		"It is 48 F and cloudy in Juneau.",
+	}}
+	events, err := New().Run(context.Background(), contracts.Task{Prompt: "weather"}, contracts.AIProfile{
+		Roles: []contracts.ModelRole{{Role: "assistant", ModelID: "m"}},
+		Tools: []contracts.ToolPolicy{{ToolID: "internet.search", Policy: "allow"}},
+	}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var text string
+	for evt := range events {
+		if evt.Type == "agent.message" {
+			text += evt.Content
+		}
+	}
+	if env.tools != 1 || !strings.Contains(text, "48 F") || strings.Contains(text, "tool_call") {
+		t.Fatalf("tools=%d text=%q", env.tools, text)
+	}
+}
+
+func TestLiveQuestionReadsAPageInsteadOfStoppingAtLinks(t *testing.T) {
+	env := &searchPageEnv{scriptedEnv: scriptedEnv{replies: []string{
+		`{"tool_call":{"id":"internet.search","args":{"query":"Juneau weather"}}}`,
+		"Juneau is 48 F and cloudy. [Weather report](https://forecast.weather.gov/juneau)",
+	}}}
+	events, err := New().Run(context.Background(), contracts.Task{Prompt: "Can you show me the weather for Juneau?"}, contracts.AIProfile{
+		Roles: []contracts.ModelRole{{Role: "assistant", ModelID: "m"}},
+		Tools: []contracts.ToolPolicy{
+			{ToolID: "internet.search", Policy: "allow"},
+			{ToolID: "internet.open", Policy: "allow"},
+		},
+	}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var text string
+	for evt := range events {
+		if evt.Type == "agent.message" {
+			text += evt.Content
+		}
+	}
+	if len(env.calls) != 2 || env.calls[0] != "internet.search" || env.calls[1] != "internet.open" {
+		t.Fatalf("calls=%v", env.calls)
+	}
+	if env.openedURL != "https://wttr.in/juneau?format="+url.QueryEscape("%l: %t, %C, humidity %h, wind %w") {
+		t.Fatalf("opened %q", env.openedURL)
+	}
+	if !strings.Contains(text, "48 F") || strings.Contains(text, "tool_call") {
+		t.Fatalf("text=%q", text)
+	}
+	if len(env.seen) < 2 {
+		t.Fatal("model was not asked again after the page")
+	}
+	last := env.seen[1][len(env.seen[1])-1].Content
+	if !strings.Contains(last, "+48°F") || !strings.Contains(last, "Do not reply with a list of websites") {
+		t.Fatalf("follow-up=%q", last)
+	}
+}
+
+type searchPageEnv struct {
+	scriptedEnv
+	calls     []string
+	openedURL string
+}
+
+func (e *searchPageEnv) ExecuteTool(ctx context.Context, toolID string, args map[string]any) (map[string]any, error) {
+	e.tools++
+	e.calls = append(e.calls, toolID)
+	switch toolID {
+	case "internet.search":
+		return map[string]any{"results": []any{
+			map[string]any{"title": "Juneau weather videos", "url": "https://www.youtube.com/watch?v=abc", "snippet": "Watch"},
+			map[string]any{"title": "AccuWeather", "url": "https://www.accuweather.com/juneau", "snippet": "Forecast"},
+			map[string]any{"title": "NWS Juneau", "url": "https://forecast.weather.gov/juneau", "snippet": "Forecast"},
+		}}, nil
+	case "internet.open":
+		e.openedURL, _ = args["url"].(string)
+		if strings.Contains(e.openedURL, "wttr.in") {
+			return map[string]any{
+				"title":   "Juneau",
+				"url":     e.openedURL,
+				"content": "Juneau: +48°F, Cloudy, humidity 80%, wind 5mph",
+			}, nil
+		}
+		return map[string]any{
+			"title":   "Juneau",
+			"url":     e.openedURL,
+			"content": "Temperature 48 F. Conditions: cloudy.",
+		}, nil
+	default:
+		return map[string]any{"ok": true, "tool": toolID}, nil
+	}
+}
+
+func TestOrdinaryJSONIsNotAToolCall(t *testing.T) {
+	env := &scriptedEnv{replies: []string{"Example:\n{\"name\":\"Ada\",\"year\":1815}"}}
+	events, err := New().Run(context.Background(), contracts.Task{Prompt: "show json"}, contracts.AIProfile{
+		Roles: []contracts.ModelRole{{Role: "assistant", ModelID: "m"}},
+		Tools: []contracts.ToolPolicy{{ToolID: "internet.search", Policy: "allow"}},
+	}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var text string
+	for evt := range events {
+		if evt.Type == "agent.message" {
+			text += evt.Content
+		}
+	}
+	if env.tools != 0 || !strings.Contains(text, "1815") || strings.Contains(text, "tool_call") {
+		t.Fatalf("tools=%d text=%q", env.tools, text)
+	}
+}
+
+func TestToolFailureStaysOutOfTheTranscript(t *testing.T) {
+	env := &failingEnv{scriptedEnv: scriptedEnv{replies: []string{
+		`{"tool_call":{"id":"internet.search","args":{"query":"Juneau weather"}}}`,
+		"I could not reach a weather report.",
+	}}}
+	events, err := New().Run(context.Background(), contracts.Task{Prompt: "weather"}, contracts.AIProfile{
+		Roles: []contracts.ModelRole{{Role: "assistant", ModelID: "m"}},
+		Tools: []contracts.ToolPolicy{{ToolID: "internet.search", Policy: "allow"}},
+	}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var text string
+	for evt := range events {
+		if evt.Type == "agent.message" {
+			text += evt.Content
+		}
+	}
+	if env.tools != 1 || strings.Contains(text, "tool_call") || strings.Contains(text, "stack") || strings.Contains(text, "{") {
+		t.Fatalf("tools=%d text=%q", env.tools, text)
+	}
+	if !strings.Contains(text, "weather report") {
+		t.Fatalf("text=%q", text)
+	}
+}
+
+func TestNarrationIsNotTheAnswer(t *testing.T) {
+	env := &scriptedEnv{replies: []string{
+		`I will now use the web tool. {"tool_call":{"id":"internet.search","args":{"query":"Juneau weather"}}}`,
+		"Juneau is currently cloudy.",
+	}}
+	events, err := New().Run(context.Background(), contracts.Task{Prompt: "weather"}, contracts.AIProfile{
+		Roles: []contracts.ModelRole{{Role: "assistant", ModelID: "m"}},
+		Tools: []contracts.ToolPolicy{{ToolID: "internet.search", Policy: "allow"}},
+	}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var text string
+	for evt := range events {
+		if evt.Type == "agent.message" {
+			text += evt.Content
+		}
+	}
+	if env.tools != 1 || strings.Contains(strings.ToLower(text), "web tool") || strings.Contains(text, "tool_call") {
+		t.Fatalf("tools=%d text=%q", env.tools, text)
+	}
+}
+
+func TestToolLoopStopsAtMaxDepth(t *testing.T) {
+	replies := make([]string, maxToolCalls+2)
+	for i := range replies {
+		replies[i] = `{"tool_call":{"id":"internet.search","args":{"query":"x"}}}`
+	}
+	env := &scriptedEnv{replies: replies}
+	events, err := New().Run(context.Background(), contracts.Task{Prompt: "loop"}, contracts.AIProfile{
+		Roles: []contracts.ModelRole{{Role: "assistant", ModelID: "m"}},
+		Tools: []contracts.ToolPolicy{{ToolID: "internet.search", Policy: "allow"}},
+	}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var text string
+	for evt := range events {
+		if evt.Type == "agent.message" {
+			text += evt.Content
+		}
+	}
+	if env.tools != maxToolCalls || !strings.Contains(text, "stopped") {
+		t.Fatalf("tools=%d text=%q", env.tools, text)
+	}
+}
+
+type memoryEnv struct {
+	scriptedEnv
+	prior []pluginapi.ChatMessage
+	limit int
+}
+
+func (e *memoryEnv) PriorMessages(context.Context) []pluginapi.ChatMessage { return e.prior }
+func (e *memoryEnv) ContextLimit() int                                     { return e.limit }
+
+func TestOlderMessagesStayInThePromptUntilTheyDoNotFit(t *testing.T) {
+	env := &memoryEnv{
+		scriptedEnv: scriptedEnv{replies: []string{"ok"}},
+		prior: []pluginapi.ChatMessage{
+			{Role: "user", Content: strings.Repeat("a", 4000)},
+			{Role: "assistant", Content: "recent"},
+		},
+		limit: 600,
+	}
+	events, err := New().Run(context.Background(), contracts.Task{Prompt: "now"}, contracts.AIProfile{
+		Roles: []contracts.ModelRole{{Role: "assistant", ModelID: "m"}},
+	}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var usage map[string]any
+	for evt := range events {
+		if evt.Type == "agent.completed" {
+			usage, _ = evt.Payload["context"].(map[string]any)
+		}
+	}
+	if len(env.seen) == 0 {
+		t.Fatal("model was not called")
+	}
+	var joined string
+	for _, msg := range env.seen[0] {
+		joined += msg.Role + ":" + msg.Content + "\n"
+	}
+	if strings.Contains(joined, "aaaa") || !strings.Contains(joined, "recent") || !strings.Contains(joined, "user:now") {
+		t.Fatalf("prompt=\n%s", joined)
+	}
+	if usage == nil || usage["conversation"] == 0 {
+		t.Fatalf("context=%v", usage)
+	}
+}

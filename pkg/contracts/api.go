@@ -1,0 +1,532 @@
+package contracts
+
+import "time"
+
+// ErrorBody is the standard public API error envelope.
+type ErrorBody struct {
+	Code    string         `json:"code"`
+	Message string         `json:"message"`
+	Details map[string]any `json:"details,omitempty"`
+}
+
+// APIError wraps ErrorBody for JSON responses.
+type APIError struct {
+	Error ErrorBody `json:"error"`
+}
+
+// HealthResponse is returned by GET /api/v1/health.
+type HealthResponse struct {
+	Status  string `json:"status"`
+	Product string `json:"product"`
+	Version string `json:"version"`
+}
+
+// VersionResponse is returned by GET /api/v1/version.
+type VersionResponse struct {
+	Version   string `json:"version"`
+	Commit    string `json:"commit"`
+	BuildDate string `json:"build_date"`
+	Product   string `json:"product"`
+}
+
+// CPUInfo describes the host CPU.
+type CPUInfo struct {
+	Model   string `json:"model"`
+	Cores   int    `json:"cores"`
+	Threads int    `json:"threads,omitempty"`
+}
+
+// MemoryInfo describes system memory.
+type MemoryInfo struct {
+	TotalBytes     uint64 `json:"total_bytes"`
+	AvailableBytes uint64 `json:"available_bytes,omitempty"`
+	// Swap is a degraded fallback. It is not added to normal capacity.
+	SwapTotalBytes uint64 `json:"swap_total_bytes,omitempty"`
+	SwapUsedBytes  uint64 `json:"swap_used_bytes,omitempty"`
+}
+
+// DiskInfo describes available disk for models/runtimes.
+type DiskInfo struct {
+	Path           string `json:"path"`
+	TotalBytes     uint64 `json:"total_bytes"`
+	AvailableBytes uint64 `json:"available_bytes"`
+}
+
+// Accelerator describes a GPU or other accelerator.
+type Accelerator struct {
+	ID            string   `json:"id"`
+	Vendor        string   `json:"vendor"`
+	Model         string   `json:"model"`
+	Kind          string   `json:"kind"`
+	DedicatedVRAM uint64   `json:"dedicated_vram_bytes,omitempty"`
+	UnifiedMemory uint64   `json:"unified_memory_bytes,omitempty"`
+	Backends      []string `json:"backends,omitempty"`
+}
+
+// HardwareInventory is the full hardware snapshot for a node.
+type HardwareInventory struct {
+	OS           string        `json:"os"`
+	Arch         string        `json:"arch"`
+	Hostname     string        `json:"hostname,omitempty"`
+	CPU          CPUInfo       `json:"cpu"`
+	Memory       MemoryInfo    `json:"memory"`
+	Disk         DiskInfo      `json:"disk"`
+	Accelerators []Accelerator `json:"accelerators"`
+	DetectedAt   time.Time     `json:"detected_at"`
+}
+
+// NodeStatus enumerates node liveness.
+type NodeStatus string
+
+const (
+	NodeStatusOnline  NodeStatus = "online"
+	NodeStatusOffline NodeStatus = "offline"
+	NodeStatusUnknown NodeStatus = "unknown"
+)
+
+// Node is a cluster member.
+type Node struct {
+	ID         string             `json:"id"`
+	Name       string             `json:"name"`
+	OS         string             `json:"os"`
+	Arch       string             `json:"arch"`
+	Status     NodeStatus         `json:"status"`
+	IsLocal    bool               `json:"is_local"`
+	Paired     bool               `json:"paired"`
+	Hardware   *HardwareInventory `json:"hardware,omitempty"`
+	LastSeenAt *time.Time         `json:"last_seen_at,omitempty"`
+	Address    string             `json:"address,omitempty"`
+}
+
+// ModelCapabilities describes model features.
+type ModelCapabilities struct {
+	ToolCalling     bool   `json:"tool_calling"`
+	ToolCallSupport string `json:"tool_call_support,omitempty"` // native | compatible | limited | unsupported
+	Vision          bool   `json:"vision"`
+	Coding          bool   `json:"coding"`
+}
+
+// ModelSource describes where a model artifact comes from.
+type ModelSource struct {
+	URL    string `json:"url"`
+	SHA256 string `json:"sha256,omitempty"`
+	Format string `json:"format,omitempty"`
+}
+
+// Model is a catalog or installed model.
+type Model struct {
+	ID           string            `json:"id"`
+	DisplayName  string            `json:"display_name"`
+	Summary      string            `json:"summary,omitempty"`
+	Family       string            `json:"family,omitempty"`
+	Variant      string            `json:"variant,omitempty"`
+	Parameters   string            `json:"parameters,omitempty"` // e.g. "14B"
+	SizeBytes    uint64            `json:"size_bytes,omitempty"`
+	MemoryNeeded uint64            `json:"memory_needed_bytes,omitempty"`
+	Context      int               `json:"context,omitempty"`
+	Capabilities ModelCapabilities `json:"capabilities"`
+	Source       ModelSource       `json:"source,omitempty"`
+	Purpose      []string          `json:"purpose,omitempty"`
+	Tags         []string          `json:"tags,omitempty"` // coding, general, reasoning, vision, fast, large
+	Runtime      []string          `json:"runtime,omitempty"`
+	Roles        []string          `json:"recommended_roles,omitempty"`
+	Installed    bool              `json:"installed"`
+	InstalledOn  []ModelOnNode     `json:"installed_on,omitempty"`
+	Status       string            `json:"status,omitempty"` // available|downloading|installed|loading|running|stopping|error
+	LastUsedAt   *time.Time        `json:"last_used_at,omitempty"`
+	Fit          *ModelFit         `json:"fit,omitempty"`
+	Dynamic      bool              `json:"dynamic,omitempty"` // installed from browse-all / URL
+}
+
+// ModelOnNode records that a model file is present on a computer.
+type ModelOnNode struct {
+	NodeID   string `json:"node_id"`
+	NodeName string `json:"node_name"`
+}
+
+// FitLabel is a hardware suitability grade for a model on a node.
+type FitLabel string
+
+const (
+	FitExcellent   FitLabel = "excellent"
+	FitGood        FitLabel = "good"
+	FitTight       FitLabel = "tight"
+	FitHeavy       FitLabel = "heavy"
+	FitUnsupported FitLabel = "unsupported"
+	// FitTooLarge is the old binary rejection. New estimates use heavy or unsupported.
+	FitTooLarge FitLabel = "too_large"
+)
+
+// ModelFit describes how well a model fits a node's hardware.
+type ModelFit struct {
+	ModelID             string   `json:"model_id"`
+	NodeID              string   `json:"node_id,omitempty"`
+	NodeName            string   `json:"node_name,omitempty"`
+	Label               FitLabel `json:"label"`
+	ExpectedMemoryBytes uint64   `json:"expected_memory_bytes"`
+	Reason              string   `json:"reason,omitempty"`
+	EstTokPerSec        float64  `json:"est_tok_per_sec,omitempty"`
+	TokPerSecMeasured   bool     `json:"tok_per_sec_measured,omitempty"`
+	// RuntimeMemoryLowBytes and RuntimeMemoryHighBytes are a conservative range
+	// for weights, KV cache, and runtime buffers. They are not the file size alone.
+	RuntimeMemoryLowBytes  uint64   `json:"runtime_memory_low_bytes,omitempty"`
+	RuntimeMemoryHighBytes uint64   `json:"runtime_memory_high_bytes,omitempty"`
+	WeightBytes            uint64   `json:"weight_bytes,omitempty"`
+	Quantization           string   `json:"quantization,omitempty"`
+	Approximate            bool     `json:"approximate,omitempty"`
+	ContextTokens          int      `json:"context_tokens,omitempty"`
+	TotalMemoryBytes       uint64   `json:"total_memory_bytes,omitempty"`
+	AvailableMemoryBytes   uint64   `json:"available_memory_bytes,omitempty"`
+	MemoryKind             string   `json:"memory_kind,omitempty"` // unified | system
+	Headroom               float64  `json:"headroom,omitempty"`
+	InstallAllowed         bool     `json:"install_allowed"`
+	RuntimeWarning         string   `json:"runtime_warning,omitempty"`
+	Recommendations        []string `json:"recommendations,omitempty"`
+	GPUNote                string   `json:"gpu_note,omitempty"`
+	KnownToRun             bool     `json:"known_to_run,omitempty"`
+}
+
+// CategoryWinner is a recommendation badge for Discover.
+type CategoryWinner struct {
+	Category string `json:"category"` // best_overall|fastest|best_quality|lowest_memory|coding|general|reasoning|vision
+	Label    string `json:"label"`    // human label e.g. "Best coding"
+	ModelID  string `json:"model_id"`
+}
+
+// ModelsFitResponse is returned by GET /models/fit.
+type ModelsFitResponse struct {
+	NodeID      string           `json:"node_id,omitempty"`
+	NodeName    string           `json:"node_name,omitempty"`
+	MemoryBytes uint64           `json:"memory_bytes"`
+	Fits        []ModelFit       `json:"fits"`
+	Winners     []CategoryWinner `json:"winners"`
+}
+
+// RunningModelView is a loaded model instance for the Running tab.
+type RunningModelView struct {
+	ModelID        string     `json:"model_id"`
+	DisplayName    string     `json:"display_name"`
+	InstanceID     string     `json:"instance_id"`
+	NodeID         string     `json:"node_id"`
+	NodeName       string     `json:"node_name"`
+	Status         string     `json:"status"`
+	MemoryBytes    uint64     `json:"memory_bytes,omitempty"`
+	Endpoint       string     `json:"endpoint,omitempty"`
+	SpeedTokPerSec float64    `json:"speed_tok_per_sec,omitempty"`
+	UsedByProfiles []string   `json:"used_by_profiles,omitempty"`
+	Accelerator    string     `json:"accelerator,omitempty"`
+	LastUsedAt     *time.Time `json:"last_used_at,omitempty"`
+}
+
+// BrowseModel is a Hugging Face browse-all hit (GGUF filtered).
+type BrowseModel struct {
+	ID          string   `json:"id"`
+	DisplayName string   `json:"display_name"`
+	Summary     string   `json:"summary,omitempty"`
+	RepoID      string   `json:"repo_id"`
+	Filename    string   `json:"filename"`
+	SourceURL   string   `json:"source_url"`
+	SizeBytes   uint64   `json:"size_bytes,omitempty"`
+	Parameters  string   `json:"parameters,omitempty"`
+	Variant     string   `json:"variant,omitempty"`
+	Downloads   int      `json:"downloads,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+}
+
+// InstallFromURLRequest installs a model from a direct GGUF URL (browse-all).
+type InstallFromURLRequest struct {
+	SourceURL   string   `json:"source_url"`
+	DisplayName string   `json:"display_name,omitempty"`
+	ID          string   `json:"id,omitempty"`
+	Filename    string   `json:"filename,omitempty"`
+	SizeBytes   uint64   `json:"size_bytes,omitempty"`
+	Parameters  string   `json:"parameters,omitempty"`
+	Variant     string   `json:"variant,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	NodeID      string   `json:"node_id,omitempty"`
+}
+
+// ModelStartRequest starts a loaded instance.
+type ModelStartRequest struct {
+	NodeID string `json:"node_id,omitempty"`
+}
+
+// ModelStopRequest stops a loaded instance.
+type ModelStopRequest struct {
+	NodeID     string `json:"node_id,omitempty"`
+	InstanceID string `json:"instance_id,omitempty"`
+}
+
+// ModelRole assignment within a profile.
+type ModelRole struct {
+	Role     string `json:"role"`
+	ModelID  string `json:"model_id"`
+	NodeID   string `json:"node_id,omitempty"`
+	Required bool   `json:"required"`
+}
+
+// ToolPolicy for a profile tool.
+type ToolPolicy struct {
+	ToolID string `json:"tool_id"`
+	Policy string `json:"policy"` // deny | ask | allow-for-session | allow
+}
+
+// NodePolicy controls placement preferences.
+type NodePolicy struct {
+	Mode string `json:"mode"` // automatic | prefer_local | manual
+}
+
+// AIProfile is the user-facing AI configuration.
+type AIProfile struct {
+	ID             string       `json:"id"`
+	Name           string       `json:"name"`
+	Purpose        string       `json:"purpose"`
+	OrchestratorID string       `json:"orchestrator_id"`
+	Roles          []ModelRole  `json:"roles"`
+	Tools          []ToolPolicy `json:"tools,omitempty"`
+	NodePolicy     NodePolicy   `json:"node_policy"`
+}
+
+// Conversation is a chat thread.
+type Conversation struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	ProfileID string    `json:"profile_id,omitempty"`
+	ModelID   string    `json:"model_id,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Message is a chat message.
+type Message struct {
+	ID             string    `json:"id"`
+	ConversationID string    `json:"conversation_id"`
+	Role           string    `json:"role"`
+	Content        string    `json:"content"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// GenerationMetrics is per-turn inference performance.
+type GenerationMetrics struct {
+	PromptTokens     int     `json:"prompt_tokens"`
+	CompletionTokens int     `json:"completion_tokens"`
+	TotalTokens      int     `json:"total_tokens"`
+	TTFTMs           float64 `json:"ttft_ms"`
+	PromptMs         float64 `json:"prompt_ms"`
+	EvalMs           float64 `json:"eval_ms"`
+	TotalMs          float64 `json:"total_ms"`
+	PromptTokPerSec  float64 `json:"prompt_tok_per_sec"`
+	EvalTokPerSec    float64 `json:"eval_tok_per_sec"`
+}
+
+// GenerationRoleStep is one orchestrator role's metrics on a specific node.
+type GenerationRoleStep struct {
+	Role             string  `json:"role"`
+	NodeID           string  `json:"node_id,omitempty"`
+	NodeName         string  `json:"node_name,omitempty"`
+	ModelID          string  `json:"model_id,omitempty"`
+	PromptTokens     int     `json:"prompt_tokens"`
+	CompletionTokens int     `json:"completion_tokens"`
+	TotalTokens      int     `json:"total_tokens"`
+	TTFTMs           float64 `json:"ttft_ms"`
+	PromptMs         float64 `json:"prompt_ms"`
+	EvalMs           float64 `json:"eval_ms"`
+	TotalMs          float64 `json:"total_ms"`
+	PromptTokPerSec  float64 `json:"prompt_tok_per_sec"`
+	EvalTokPerSec    float64 `json:"eval_tok_per_sec"`
+}
+
+// GenerationRun is a stored performance sample for the Performance tab.
+type GenerationRun struct {
+	ID                string               `json:"id"`
+	ConversationID    string               `json:"conversation_id,omitempty"`
+	ConversationTitle string               `json:"conversation_title,omitempty"`
+	MessageID         string               `json:"message_id,omitempty"`
+	ProfileID         string               `json:"profile_id,omitempty"`
+	ProfileName       string               `json:"profile_name,omitempty"`
+	ModelID           string               `json:"model_id"`
+	RuntimeID         string               `json:"runtime_id"`
+	PromptTokens      int                  `json:"prompt_tokens"`
+	CompletionTokens  int                  `json:"completion_tokens"`
+	TotalTokens       int                  `json:"total_tokens"`
+	TTFTMs            float64              `json:"ttft_ms"`
+	PromptMs          float64              `json:"prompt_ms"`
+	EvalMs            float64              `json:"eval_ms"`
+	TotalMs           float64              `json:"total_ms"`
+	PromptTokPerSec   float64              `json:"prompt_tok_per_sec"`
+	EvalTokPerSec     float64              `json:"eval_tok_per_sec"`
+	RoleSteps         []GenerationRoleStep `json:"role_steps,omitempty"`
+	CrossMachine      bool                 `json:"cross_machine"`
+	NodeCount         int                  `json:"node_count,omitempty"`
+	CreatedAt         time.Time            `json:"created_at"`
+}
+
+// BenchmarkPrompt is one prompt inside a workload category.
+type BenchmarkPrompt struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Text  string `json:"text"`
+}
+
+// BenchmarkWorkload groups prompts by use-case category.
+type BenchmarkWorkload struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Prompts     []BenchmarkPrompt `json:"prompts"`
+}
+
+// BenchmarkRequest starts a multi-model comparison.
+type BenchmarkRequest struct {
+	ModelIDs    []string `json:"model_ids"`
+	WorkloadIDs []string `json:"workload_ids"`
+	Runs        int      `json:"runs,omitempty"` // measured runs per prompt (default 2)
+}
+
+// BenchmarkStatus enumerates job lifecycle.
+type BenchmarkStatus string
+
+const (
+	BenchmarkPending   BenchmarkStatus = "pending"
+	BenchmarkRunning   BenchmarkStatus = "running"
+	BenchmarkCompleted BenchmarkStatus = "completed"
+	BenchmarkFailed    BenchmarkStatus = "failed"
+	BenchmarkCancelled BenchmarkStatus = "cancelled"
+)
+
+// BenchmarkProgress is live progress for the UI.
+type BenchmarkProgress struct {
+	Percent         int    `json:"percent"`
+	Phase           string `json:"phase"`
+	CurrentModel    string `json:"current_model,omitempty"`
+	CurrentWorkload string `json:"current_workload,omitempty"`
+	CurrentPrompt   string `json:"current_prompt,omitempty"`
+	CompletedSteps  int    `json:"completed_steps"`
+	TotalSteps      int    `json:"total_steps"`
+	Message         string `json:"message,omitempty"`
+}
+
+// BenchmarkSample is one measured generation during a job.
+type BenchmarkSample struct {
+	ModelID          string  `json:"model_id"`
+	WorkloadID       string  `json:"workload_id"`
+	PromptID         string  `json:"prompt_id"`
+	RunIndex         int     `json:"run_index"`
+	Warmup           bool    `json:"warmup"`
+	LoadMs           float64 `json:"load_ms,omitempty"`
+	TTFTMs           float64 `json:"ttft_ms"`
+	PromptMs         float64 `json:"prompt_ms"`
+	EvalMs           float64 `json:"eval_ms"`
+	TotalMs          float64 `json:"total_ms"`
+	PromptTokPerSec  float64 `json:"prompt_tok_per_sec"`
+	EvalTokPerSec    float64 `json:"eval_tok_per_sec"`
+	PromptTokens     int     `json:"prompt_tokens"`
+	CompletionTokens int     `json:"completion_tokens"`
+	Error            string  `json:"error,omitempty"`
+}
+
+// BenchmarkModelSummary aggregates measured samples for one model × workload.
+type BenchmarkModelSummary struct {
+	ModelID            string  `json:"model_id"`
+	WorkloadID         string  `json:"workload_id"`
+	Samples            int     `json:"samples"`
+	AvgTTFTMs          float64 `json:"avg_ttft_ms"`
+	AvgPromptMs        float64 `json:"avg_prompt_ms"`
+	AvgEvalMs          float64 `json:"avg_eval_ms"`
+	AvgTotalMs         float64 `json:"avg_total_ms"`
+	AvgPromptTokPerSec float64 `json:"avg_prompt_tok_per_sec"`
+	AvgEvalTokPerSec   float64 `json:"avg_eval_tok_per_sec"`
+	LoadMs             float64 `json:"load_ms,omitempty"`
+	WinnerScore        float64 `json:"winner_score"` // higher = better (eval tok/s weighted with TTFT)
+}
+
+// BenchmarkJob is a full comparison run.
+type BenchmarkJob struct {
+	ID          string                  `json:"id"`
+	Status      BenchmarkStatus         `json:"status"`
+	Request     BenchmarkRequest        `json:"request"`
+	Progress    BenchmarkProgress       `json:"progress"`
+	Samples     []BenchmarkSample       `json:"samples"`
+	Summaries   []BenchmarkModelSummary `json:"summaries"`
+	Winners     map[string]string       `json:"winners"` // workload_id -> model_id
+	Error       string                  `json:"error,omitempty"`
+	CreatedAt   time.Time               `json:"created_at"`
+	StartedAt   *time.Time              `json:"started_at,omitempty"`
+	CompletedAt *time.Time              `json:"completed_at,omitempty"`
+}
+
+// TaskStatus enumerates task lifecycle.
+type TaskStatus string
+
+const (
+	TaskPending   TaskStatus = "pending"
+	TaskRunning   TaskStatus = "running"
+	TaskCompleted TaskStatus = "completed"
+	TaskFailed    TaskStatus = "failed"
+	TaskCancelled TaskStatus = "cancelled"
+)
+
+// Task is an orchestration unit of work.
+type Task struct {
+	ID             string     `json:"id"`
+	ProfileID      string     `json:"profile_id"`
+	ConversationID string     `json:"conversation_id,omitempty"`
+	Prompt         string     `json:"prompt"`
+	Status         TaskStatus `json:"status"`
+	Result         string     `json:"result,omitempty"`
+	Error          string     `json:"error,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+}
+
+// SettingsView is the user-visible settings payload.
+type SettingsView struct {
+	DataDir           string `json:"data_dir"`
+	ModelsDir         string `json:"models_dir"`
+	RuntimesDir       string `json:"runtimes_dir"`
+	LogsDir           string `json:"logs_dir"`
+	APIHost           string `json:"api_host"`
+	APIPort           int    `json:"api_port"`
+	LANAPIEnabled     bool   `json:"lan_api_enabled"`
+	WebUIEnabled      bool   `json:"web_ui_enabled"`
+	DiscoveryEnabled  bool   `json:"discovery_enabled"`
+	NodeName          string `json:"node_name"`
+	NodeID            string `json:"node_id"`
+	AdvancedMode      bool   `json:"advanced_mode"`
+	ModelLifecycle    string `json:"model_lifecycle"`     // automatic | manual
+	IdleUnloadMinutes int    `json:"idle_unload_minutes"` // 0 = never
+	// KeepRunningInBackground keeps the local daemon (and desktop tray) alive
+	// when the main window is closed. Default false: quitting the app stops the daemon.
+	KeepRunningInBackground bool `json:"keep_running_in_background"`
+
+	// DefaultProfileID is the preferred Chat profile when starting a new conversation.
+	DefaultProfileID string `json:"default_profile_id,omitempty"`
+	// DefaultExecution: automatic | local | ask
+	DefaultExecution string `json:"default_execution"`
+	// DownloadBehavior: ask | automatic
+	DownloadBehavior string `json:"download_behavior"`
+	// ModelStorageLimitGB is 0 for unlimited.
+	ModelStorageLimitGB int  `json:"model_storage_limit_gb"`
+	SaveChatHistory     bool `json:"save_chat_history"`
+	SaveTaskHistory     bool `json:"save_task_history"`
+	NotifyTaskFinish    bool `json:"notify_task_finish"`
+	NotifyPeerOffline   bool `json:"notify_peer_offline"`
+	// Tool defaults: deny | ask | allow | allow-for-session
+	ToolTerminal   string `json:"tool_terminal"`
+	ToolFileWrites string `json:"tool_file_writes"`
+	ToolGit        string `json:"tool_git"`
+	// LaunchAtLogin starts Yggdrasil when the user signs in (desktop shell).
+	LaunchAtLogin bool `json:"launch_at_login"`
+	// DiscoveryNeedsRestart is true when enabling discovery requires a process restart
+	// to rebind Bifrost to the LAN (listener already started on loopback).
+	DiscoveryNeedsRestart bool `json:"discovery_needs_restart,omitempty"`
+}
+
+// Recommendation explains a recommended model setup.
+type Recommendation struct {
+	Purpose      string      `json:"purpose"`
+	Roles        []ModelRole `json:"roles"`
+	Models       []Model     `json:"models"`
+	Reason       string      `json:"reason"`
+	StorageBytes uint64      `json:"estimated_storage_bytes"`
+	VRAMBytes    uint64      `json:"estimated_vram_bytes"`
+}

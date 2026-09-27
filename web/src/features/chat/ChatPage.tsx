@@ -1,0 +1,1451 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
+import { api, streamChat } from '@/lib/api'
+import { subscribeEvents } from '@/lib/events'
+import { useUIStore } from '@/stores/uiStore'
+import type {
+  AIProfile,
+  ChatTokenPayload,
+  Conversation,
+  Message,
+  OrchestrationRolePayload,
+  ToolRequestedPayload,
+} from '@/types/api'
+import { capabilityGap, type CapabilityGap } from '@/features/models/capabilityGap'
+import { activeCapabilityLabels, setCapability } from '@/features/profiles/capabilities'
+import { modelToolAssessment } from '@/features/models/modelPresentation'
+import { CapabilityNotice } from './CapabilityNotice'
+import { ChatActivity } from './ChatActivity'
+import { ChatHistoryDrawer, useCanPinChatHistory } from './ChatHistoryDrawer'
+import { ChatMarkdown } from './ChatMarkdown'
+import { ContextUsageButton } from './ContextUsageButton'
+import { contextWindow, parseContextUsage, type ContextUsage } from './contextUsage'
+import { displayChatText } from './displayChatText'
+import { parseModelFailure, type ModelFailure } from './modelFailure'
+import { ModelFailureNotice } from './ModelFailureNotice'
+import { useChatFollow } from './useChatFollow'
+
+type TeamStep = {
+  role: string
+  nodeId?: string
+  nodeName?: string
+}
+
+type PendingToolPrompt = {
+  requestId: string
+  toolId: string
+  reason?: string
+  argsSummary: string
+  rawArgs?: string
+}
+
+type RunMode = 'automatic' | 'local'
+
+const SUGGESTIONS = [
+  { label: 'Explain a topic', prompt: 'Explain what a mutex is in two short paragraphs.' },
+  { label: 'Help me code', prompt: 'Help me write a clean Go function that retries an HTTP request with backoff.' },
+  { label: 'Plan something', prompt: 'Help me outline a weekend trip itinerary in three short sections.' },
+] as const
+
+const PROFILE_PURPOSE_ORDER = ['general', 'coding', 'research', 'custom'] as const
+
+function sortProfiles(profiles: AIProfile[]): AIProfile[] {
+  return [...profiles].sort((a, b) => {
+    const ai = PROFILE_PURPOSE_ORDER.indexOf(
+      a.purpose as (typeof PROFILE_PURPOSE_ORDER)[number],
+    )
+    const bi = PROFILE_PURPOSE_ORDER.indexOf(
+      b.purpose as (typeof PROFILE_PURPOSE_ORDER)[number],
+    )
+    const ax = ai === -1 ? 99 : ai
+    const bx = bi === -1 ? 99 : bi
+    if (ax !== bx) return ax - bx
+    return a.name.localeCompare(b.name)
+  })
+}
+
+function formatRoleLabel(role: string): string {
+  if (!role) return 'Role'
+  return role.charAt(0).toUpperCase() + role.slice(1)
+}
+
+function hostLabel(value: string): string {
+  try {
+    return new URL(value).hostname || value
+  } catch {
+    return value.length > 48 ? `${value.slice(0, 48)}…` : value
+  }
+}
+
+function friendlyToolDetail(args: Record<string, unknown> | undefined): string {
+  if (!args) return ''
+  for (const key of ['query', 'url', 'path', 'command', 'message', 'revision']) {
+    const value = args[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
+function formatToolArgs(args: Record<string, unknown> | undefined): string {
+  if (!args || Object.keys(args).length === 0) {
+    return 'No arguments'
+  }
+  try {
+    const raw = JSON.stringify(args, null, 2)
+    return raw.length > 400 ? `${raw.slice(0, 400)}…` : raw
+  } catch {
+    return 'Arguments unavailable'
+  }
+}
+
+function toolDisplayName(toolId: string): string {
+  const names: Record<string, string> = {
+    'internet.search': 'Web search',
+    'internet.open': 'Open page',
+    'filesystem.search': 'Find files',
+    'filesystem.read': 'Read file',
+    'filesystem.write': 'Write file',
+    terminal: 'Terminal',
+    'git.status': 'Git status',
+    'git.diff': 'Git diff',
+    'git.log': 'Git log',
+    'git.show': 'Git show',
+    'git.add': 'Git add',
+    'git.commit': 'Git commit',
+    'git.push': 'Git push',
+  }
+  return names[toolId] || toolId
+}
+
+function toolProgress(toolId?: string, summary?: string): string {
+  if (toolId === 'internet.search') return 'Searching the web…'
+  if (toolId === 'internet.open') return summary ? `Reading ${hostLabel(summary)}…` : 'Reading a page…'
+  if (toolId === 'filesystem.read') return 'Reading a file…'
+  if (toolId === 'filesystem.search') return 'Searching local files…'
+  if (toolId === 'terminal') return 'Running command…'
+  if (toolId === 'git.status' || toolId === 'git.diff' || toolId === 'git.log' || toolId === 'git.show') {
+    return 'Checking git…'
+  }
+  return toolId ? `Using ${toolDisplayName(toolId)}…` : 'Working…'
+}
+
+export function ChatPage() {
+  const queryClient = useQueryClient()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeProfileId = useUIStore((s) => s.activeProfileId)
+  const setActiveProfileId = useUIStore((s) => s.setActiveProfileId)
+  const advancedMode = useUIStore((s) => s.advancedMode)
+  const chatHistoryPinned = useUIStore((s) => s.chatHistoryPinned)
+  const setChatHistoryPinned = useUIStore((s) => s.setChatHistoryPinned)
+  const pinnedConversationIds = useUIStore((s) => s.pinnedConversationIds)
+  const togglePinnedConversation = useUIStore((s) => s.togglePinnedConversation)
+  const canPinHistory = useCanPinChatHistory()
+
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  const [draftProfileId, setDraftProfileId] = useState<string | null>(null)
+  const [draftModelId, setDraftModelId] = useState<string | null>(null)
+  const [modelChoice, setModelChoice] = useState<{ chatId: string | null; modelId: string } | null>(null)
+  const [streamingContent, setStreamingContent] = useState<string | null>(null)
+  const [isSending, setIsSending] = useState(false)
+  const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const [sendError, setSendError] = useState<string | null>(null)
+  const [modelFailure, setModelFailure] = useState<ModelFailure | null>(null)
+  const [responseInterrupted, setResponseInterrupted] = useState(false)
+  const [capabilityNotice, setCapabilityNotice] = useState<CapabilityGap | null>(null)
+  const [toolTraces, setToolTraces] = useState<{ label: string; detail: string; status: string }[]>([])
+  const [toolDetailsOpen, setToolDetailsOpen] = useState(false)
+  const [teamSteps, setTeamSteps] = useState<TeamStep[]>([])
+  const [pendingTool, setPendingTool] = useState<PendingToolPrompt | null>(null)
+  const [toolDeciding, setToolDeciding] = useState(false)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<Conversation | null>(null)
+  const [listError, setListError] = useState<string | null>(null)
+  const [runMode, setRunMode] = useState<RunMode | null>(null)
+  const [executionAsked, setExecutionAsked] = useState(false)
+  const { scrollerRef, contentRef, showJump, jumpToLatest, followLatest } = useChatFollow(selectedId)
+
+  useEffect(() => {
+    setContextUsage(null)
+  }, [selectedId])
+  const abortRef = useRef<AbortController | null>(null)
+  const lastUserMessageRef = useRef('')
+  const [toolFailure, setToolFailure] = useState<string | null>(null)
+  const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null)
+  const streamingConvRef = useRef<string | null>(null)
+  const composerRef = useRef<HTMLTextAreaElement | null>(null)
+  const profileSelectRef = useRef<HTMLSelectElement | null>(null)
+  const modelSelectRef = useRef<HTMLSelectElement | null>(null)
+  const streamingTextRef = useRef('')
+
+  const conversationsQuery = useQuery({
+    queryKey: ['conversations'],
+    queryFn: () => api.getConversations(),
+    retry: false,
+  })
+
+  const profilesQuery = useQuery({
+    queryKey: ['profiles'],
+    queryFn: () => api.getProfiles(),
+    retry: false,
+  })
+
+  const modelsQuery = useQuery({
+    queryKey: ['models'],
+    queryFn: () => api.getModels(),
+    retry: false,
+  })
+
+  const nodesQuery = useQuery({
+    queryKey: ['nodes'],
+    queryFn: () => api.getNodes(),
+    retry: false,
+    staleTime: 30_000,
+  })
+
+  const settingsQuery = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => api.getSettings(),
+    retry: false,
+    staleTime: 60_000,
+  })
+
+  const messagesQuery = useQuery({
+    queryKey: ['messages', selectedId],
+    queryFn: () => (selectedId ? api.getMessages(selectedId) : null),
+    enabled: Boolean(selectedId),
+    retry: false,
+  })
+
+  useEffect(() => {
+    const fromQuery = searchParams.get('c')
+    const profileFromQuery = searchParams.get('profile')
+    const startNew = searchParams.get('new') === '1'
+    if (!fromQuery && !profileFromQuery && !startNew) return
+
+    if (fromQuery) {
+      setSelectedId(fromQuery)
+    }
+    if (profileFromQuery) {
+      setActiveProfileId(profileFromQuery)
+      setDraftProfileId(profileFromQuery)
+    }
+    if (startNew) {
+      setSelectedId(null)
+      setSendError(null)
+      setStreamingContent(null)
+      setTeamSteps([])
+      setDraft('')
+      setListError(null)
+    }
+    setSearchParams({}, { replace: true })
+  }, [searchParams, setSearchParams, setActiveProfileId])
+
+  const conversations = conversationsQuery.data ?? []
+  const selectedConversation =
+    conversations.find((c) => c.id === selectedId) ?? null
+  const installedModels = (modelsQuery.data ?? []).filter(
+    (m) => m.installed || (m.installed_on?.length ?? 0) > 0,
+  )
+  const sortedProfiles = useMemo(
+    () => sortProfiles(profilesQuery.data ?? []),
+    [profilesQuery.data],
+  )
+
+  const hasCluster = useMemo(() => {
+    const nodes = nodesQuery.data ?? []
+    const online = nodes.filter((n) => n.status === 'online')
+    if (online.length > 1) return true
+    return nodes.some((n) => !n.is_local && (n.paired || n.status === 'online'))
+  }, [nodesQuery.data])
+
+  const preferredProfileId = settingsQuery.data?.default_profile_id
+  const preferredExists = preferredProfileId
+    ? sortedProfiles.some((p) => p.id === preferredProfileId)
+    : false
+
+  const defaultProfileId =
+    activeProfileId ||
+    (preferredExists ? preferredProfileId : null) ||
+    (hasCluster
+      ? sortedProfiles.find((p) => p.orchestrator_id === 'team')?.id ||
+        sortedProfiles.find((p) => p.id === 'programming')?.id ||
+        sortedProfiles.find((p) => p.purpose === 'coding')?.id
+      : null) ||
+    sortedProfiles.find((p) => p.id === 'general-assistant')?.id ||
+    sortedProfiles.find((p) => p.purpose === 'general')?.id ||
+    sortedProfiles[0]?.id ||
+    null
+
+  const profileIdForChat =
+    selectedConversation?.profile_id ||
+    draftProfileId ||
+    defaultProfileId ||
+    undefined
+
+  const chosenModelId = modelChoice && modelChoice.chatId === selectedId ? modelChoice.modelId : null
+  const modelIdForChat =
+    chosenModelId ||
+    selectedConversation?.model_id ||
+    draftModelId ||
+    installedModels[0]?.id ||
+    undefined
+
+  const modelLocations =
+    installedModels.find((m) => m.id === modelIdForChat)?.installed_on ?? []
+
+  const chatModel = (modelsQuery.data ?? []).find((model) => model.id === modelIdForChat) ?? null
+  const activeProfile =
+    sortedProfiles.find((p) => p.id === profileIdForChat) ?? null
+  const terminalAllowed = activeProfile?.tools?.find((tool) => tool.tool_id === 'terminal')?.policy !== 'deny'
+  const internetAllowed =
+    activeProfile?.tools == null
+      ? true
+      : activeProfile.tools.some(
+          (tool) =>
+            (tool.tool_id === 'internet.search' || tool.tool_id === 'internet.open') &&
+            tool.policy !== 'deny',
+        )
+  const chatToolAssessment = chatModel ? modelToolAssessment(chatModel, { terminalAllowed }) : null
+  const capabilityLine = activeCapabilityLabels(activeProfile?.tools).map((label) =>
+    label === 'Internet' ? 'Web' : label,
+  )
+  const isTeamProfile = activeProfile?.orchestrator_id === 'team'
+
+  const defaultExecution = settingsQuery.data?.default_execution ?? 'automatic'
+  const downloadBehavior = settingsQuery.data?.download_behavior ?? 'ask'
+
+  useEffect(() => {
+    if (runMode != null) return
+    if (defaultExecution === 'ask') return
+    if (defaultExecution === 'local' || defaultExecution === 'automatic') {
+      setRunMode(defaultExecution)
+    }
+  }, [defaultExecution, runMode])
+
+  const effectiveRunMode: RunMode = runMode ?? (isTeamProfile ? 'automatic' : 'local')
+
+  useEffect(() => {
+    if (!draftProfileId && defaultProfileId) {
+      setDraftProfileId(defaultProfileId)
+    }
+  }, [defaultProfileId, draftProfileId])
+
+  useEffect(() => {
+    if (!draftModelId && installedModels[0]?.id) {
+      setDraftModelId(installedModels[0].id)
+    }
+  }, [draftModelId, installedModels])
+
+  useEffect(() => {
+    composerRef.current?.focus()
+  }, [selectedId])
+
+  const deleteConversation = useMutation({
+    mutationFn: (id: string) => api.deleteConversation(id),
+    onSuccess: (_data, id) => {
+      setPendingDelete(null)
+      setListError(null)
+      queryClient.setQueryData<Conversation[]>(['conversations'], (current) =>
+        (current ?? []).filter((c) => c.id !== id),
+      )
+      queryClient.invalidateQueries({ queryKey: ['conversations'] })
+      queryClient.removeQueries({ queryKey: ['messages', id] })
+      if (selectedId === id) {
+        setSelectedId(null)
+        setSendError(null)
+        setStreamingContent(null)
+        setTeamSteps([])
+      }
+    },
+    onError: (error) => {
+      setPendingDelete(null)
+      setListError(
+        error instanceof Error ? error.message : 'Could not delete this chat.',
+      )
+    },
+  })
+
+  const updateConversation = useMutation({
+    mutationFn: ({
+      id,
+      model_id,
+      profile_id,
+      title,
+    }: {
+      id: string
+      model_id?: string
+      profile_id?: string
+      title?: string
+    }) => api.updateConversation(id, { model_id, profile_id, title }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['conversations'] })
+      setRenamingId(null)
+    },
+  })
+
+  const handleChatComplete = useCallback(
+    (conversationId: string) => {
+      if (conversationId && conversationId === streamingConvRef.current) {
+        setStreamingContent(null)
+        streamingConvRef.current = null
+        setIsSending(false)
+        setStatusMessage(null)
+        setPendingTool(null)
+        abortRef.current = null
+        queryClient.invalidateQueries({ queryKey: ['messages', conversationId] })
+        queryClient.invalidateQueries({ queryKey: ['conversations'] })
+      }
+    },
+    [queryClient],
+  )
+
+  const decidePendingTool = async (allow: boolean, allowSession = false) => {
+    if (!pendingTool || toolDeciding) return
+    setToolDeciding(true)
+    try {
+      await api.decideTool({
+        request_id: pendingTool.requestId,
+        allow,
+        allow_session: allowSession,
+      })
+      setPendingTool(null)
+      setStatusMessage(
+        allow
+          ? allowSession
+            ? 'Tool allowed for this session…'
+            : 'Tool allowed…'
+          : 'Tool denied — continuing without it…',
+      )
+    } catch (error) {
+      setSendError(
+        error instanceof Error
+          ? error.message
+          : 'Could not record the tool permission choice.',
+      )
+    } finally {
+      setToolDeciding(false)
+    }
+  }
+
+  useEffect(() => {
+    const unsubscribe = subscribeEvents({
+      onEvent: (event) => {
+        if (event.type === 'tool.requested') {
+          const payload = event.payload as ToolRequestedPayload | undefined
+          if (!payload?.request_id || !payload.tool_id) return
+          const conversationId = payload.conversation_id
+          if (
+            conversationId &&
+            conversationId !== selectedId &&
+            conversationId !== streamingConvRef.current
+          ) {
+            return
+          }
+          setPendingTool({
+            requestId: payload.request_id,
+            toolId: payload.tool_id,
+            reason: payload.reason,
+            argsSummary: friendlyToolDetail(payload.args) || 'No extra details',
+            rawArgs: formatToolArgs(payload.args),
+          })
+          setStatusMessage(
+            `Waiting for permission: ${toolDisplayName(payload.tool_id)}`,
+          )
+        }
+        if (event.type === 'tool.started') {
+          const toolId = event.payload?.tool_id as string | undefined
+          const summary = event.payload?.summary as string | undefined
+          setStatusMessage(toolProgress(toolId, summary))
+          if (toolId) {
+            setToolTraces((current) => [
+              ...current,
+              { label: toolDisplayName(toolId), detail: summary || '', status: 'running' },
+            ])
+          }
+        }
+        if (event.type === 'tool.completed') {
+          const ms = Number(event.payload?.duration_ms)
+          const done = Number.isFinite(ms) && ms >= 0 ? `Completed in ${Math.round(ms)} ms` : 'Completed'
+          setStatusMessage('Checking sources…')
+          setToolFailure(null)
+          setToolTraces((current) => {
+            const next = [...current]
+            for (let i = next.length - 1; i >= 0; i -= 1) {
+              if (next[i].status === 'running') {
+                next[i] = { ...next[i], status: done }
+                break
+              }
+            }
+            return next
+          })
+        }
+        if (event.type === 'tool.failed') {
+          if (event.payload?.malformed) return
+          const toolId = event.payload?.tool_id as string | undefined
+          const label = toolId ? toolDisplayName(toolId) : 'Tool'
+          setToolFailure(label)
+          setStatusMessage(`${label} failed`)
+          setToolTraces((current) => {
+            const next = [...current]
+            for (let i = next.length - 1; i >= 0; i -= 1) {
+              if (next[i].status === 'running') {
+                next[i] = { ...next[i], status: 'Failed' }
+                break
+              }
+            }
+            return next
+          })
+        }
+        if (event.type === 'orchestration.role') {
+          const payload = event.payload as OrchestrationRolePayload | undefined
+          const conversationId = payload?.conversation_id
+          if (
+            conversationId &&
+            conversationId !== selectedId &&
+            conversationId !== streamingConvRef.current
+          ) {
+            return
+          }
+          if (!payload?.role) return
+          const nodeName =
+            payload.node_name ||
+            modelLocations.find((n) => n.node_id === payload.node_id)?.node_name ||
+            payload.node_id
+          setTeamSteps((current) => {
+            if (current.some((step) => step.role === payload.role)) {
+              return current.map((step) =>
+                step.role === payload.role
+                  ? { role: payload.role, nodeId: payload.node_id, nodeName }
+                  : step,
+              )
+            }
+            return [
+              ...current,
+              { role: payload.role, nodeId: payload.node_id, nodeName },
+            ]
+          })
+          setStatusMessage(
+            nodeName
+              ? `${formatRoleLabel(payload.role)} on ${nodeName}…`
+              : `${formatRoleLabel(payload.role)} running…`,
+          )
+        }
+        if (event.type === 'model.load.started') {
+          const nodeId = event.payload?.node_id as string | undefined
+          const role = event.payload?.role as string | undefined
+          const nodeName =
+            (event.payload?.node_name as string | undefined) ||
+            modelLocations.find((n) => n.node_id === nodeId)?.node_name
+          setStatusMessage(
+            role && nodeName
+              ? `Loading ${formatRoleLabel(role)} on ${nodeName}…`
+              : nodeName
+                ? `Loading model on ${nodeName}…`
+                : 'Loading model…',
+          )
+        }
+        if (event.type === 'model.load.completed') {
+          const nodeId = event.payload?.node_id as string | undefined
+          const role = event.payload?.role as string | undefined
+          const nodeName =
+            (event.payload?.node_name as string | undefined) ||
+            modelLocations.find((n) => n.node_id === nodeId)?.node_name
+          setStatusMessage(
+            role && nodeName
+              ? `${formatRoleLabel(role)} generating on ${nodeName}…`
+              : nodeName
+                ? `Generating on ${nodeName}…`
+                : 'Generating response…',
+          )
+        }
+        if (event.type === 'chat.token') {
+          if (streamingConvRef.current) return
+          const payload = event.payload as ChatTokenPayload | undefined
+          if (!payload?.conversation_id || payload.conversation_id !== selectedId) {
+            return
+          }
+          setStatusMessage(null)
+          if (payload.content) {
+            setStreamingContent((current) => (current ?? '') + payload.content)
+          }
+        }
+        if (event.type === 'chat.complete') {
+          const conversationId = event.payload?.conversation_id as string | undefined
+          const nextUsage = parseContextUsage(event.payload?.context)
+          if (
+            nextUsage &&
+            conversationId &&
+            conversationId === (streamingConvRef.current ?? selectedId)
+          ) {
+            setContextUsage(nextUsage)
+          }
+          if (conversationId) handleChatComplete(conversationId)
+        }
+        if (event.type === 'chat.error') {
+          setIsSending(false)
+          setStreamingContent(null)
+          streamingConvRef.current = null
+          setStatusMessage(null)
+          setPendingTool(null)
+          setSendError(
+            (event.payload?.message as string) ||
+              'Something went wrong while generating a response.',
+          )
+        }
+      },
+    })
+    return unsubscribe
+  }, [selectedId, handleChatComplete, modelLocations])
+
+  const setProfile = (profileId: string) => {
+    setDraftProfileId(profileId)
+    if (selectedId) {
+      updateConversation.mutate({ id: selectedId, profile_id: profileId })
+    }
+  }
+
+  const chooseRunMode = (mode: RunMode) => {
+    setRunMode(mode)
+    setExecutionAsked(true)
+  }
+
+  const enableInternet = async () => {
+    if (!activeProfile) return
+    const tools = setCapability(activeProfile.tools ?? [], 'internet', true)
+    await api.updateProfile(activeProfile.id, { ...activeProfile, tools })
+    await queryClient.invalidateQueries({ queryKey: ['profiles'] })
+    setCapabilityNotice(null)
+  }
+
+  const setModel = (modelId: string) => {
+    setModelChoice({ chatId: selectedId, modelId })
+    setDraftModelId(modelId)
+    if (selectedId) {
+      updateConversation.mutate({ id: selectedId, model_id: modelId })
+    }
+  }
+
+  const ensureModelReady = async (): Promise<string | null> => {
+    if (modelIdForChat) return modelIdForChat
+    const catalog = modelsQuery.data ?? []
+    const candidate =
+      catalog.find((m) => m.installed || (m.installed_on?.length ?? 0) > 0)?.id ||
+      activeProfile?.roles?.find((r) => r.model_id)?.model_id ||
+      catalog[0]?.id
+    if (!candidate) return null
+
+    const already =
+      catalog.find((m) => m.id === candidate)?.installed ||
+      (catalog.find((m) => m.id === candidate)?.installed_on?.length ?? 0) > 0
+    if (already) return candidate
+
+    if (downloadBehavior === 'ask') {
+      const name =
+        catalog.find((m) => m.id === candidate)?.display_name || candidate
+      const ok = window.confirm(
+        `Download “${name}” so chat can continue? You can change this under Settings → Download models.`,
+      )
+      if (!ok) return null
+    }
+
+    setStatusMessage('Downloading model…')
+    await api.installModel(candidate, { wait: true })
+    await queryClient.invalidateQueries({ queryKey: ['models'] })
+    setDraftModelId(candidate)
+    return candidate
+  }
+
+  const sendMessage = async (overrideText?: string) => {
+    const message = (overrideText ?? draft).trim()
+    if (!message || isSending) return
+
+    if (defaultExecution === 'ask' && !executionAsked && runMode == null) {
+      setSendError('Choose where to run this chat: Automatic or This computer.')
+      return
+    }
+
+    let modelId: string | undefined = modelIdForChat
+    if (!modelId) {
+      try {
+        modelId = (await ensureModelReady()) ?? undefined
+      } catch (error) {
+        setSendError(
+          error instanceof Error
+            ? error.message
+            : 'Could not download a model for this chat.',
+        )
+        setStatusMessage(null)
+        return
+      }
+      if (!modelId) {
+        setSendError('Install a model first, then try again.')
+        return
+      }
+    }
+
+    lastUserMessageRef.current = message
+    followLatest()
+    setDraft('')
+    setIsSending(true)
+    setSendError(null)
+    setModelFailure(null)
+    setResponseInterrupted(false)
+    setToolFailure(null)
+    const catalog = modelsQuery.data ?? []
+    const activeModel = catalog.find((item) => item.id === modelId) ?? chatModel
+    setCapabilityNotice(capabilityGap(message, activeModel, catalog, { terminalAllowed, internetAllowed }))
+    setToolTraces([])
+    setToolDetailsOpen(false)
+    setStatusMessage('Starting…')
+    setTeamSteps([])
+    setPendingTool(null)
+    setStreamingContent('')
+    streamingTextRef.current = ''
+
+    let conversationId = selectedId
+    try {
+      if (!conversationId) {
+        const created = await api.createConversation({
+          title: message.length > 48 ? `${message.slice(0, 48)}…` : message,
+          profile_id: profileIdForChat,
+          model_id: modelId,
+        })
+        if (!created?.id) {
+          throw new Error('Could not start a conversation.')
+        }
+        conversationId = created.id
+        setSelectedId(conversationId)
+        await queryClient.invalidateQueries({ queryKey: ['conversations'] })
+      }
+
+      streamingConvRef.current = conversationId
+      const controller = new AbortController()
+      abortRef.current = controller
+
+      queryClient.setQueryData<Message[]>(['messages', conversationId], (current) => {
+        const optimistic: Message = {
+          id: `optimistic-${Date.now()}`,
+          conversation_id: conversationId!,
+          role: 'user',
+          content: message,
+          created_at: new Date().toISOString(),
+        }
+        return [...(current ?? []), optimistic]
+      })
+
+      await streamChat({
+        body: {
+          conversation_id: conversationId,
+          profile_id: profileIdForChat,
+          model_id: modelId,
+          message,
+          stream: true,
+          execution: effectiveRunMode,
+        },
+        signal: controller.signal,
+        onToken: (content) => {
+          setStatusMessage(null)
+          setToolFailure(null)
+          streamingTextRef.current += content
+          setStreamingContent((current) => (current ?? '') + content)
+        },
+        onDone: () => {
+          if (!streamingTextRef.current.trim()) {
+            setIsSending(false)
+            streamingConvRef.current = null
+            setStatusMessage(null)
+            setModelFailure({
+              kind: 'model_health',
+              reason: 'runtime_error',
+              message:
+                'The model stopped before it could reply. Yggdrasil stopped it and cleaned up the failed process.',
+            })
+            queryClient.invalidateQueries({ queryKey: ['messages', conversationId] })
+            return
+          }
+          handleChatComplete(conversationId!)
+        },
+        onError: (errMessage) => {
+          setIsSending(false)
+          streamingConvRef.current = null
+          setStatusMessage(null)
+          const failure = parseModelFailure(errMessage)
+          const partial = streamingTextRef.current.trim()
+          if (failure) {
+            setModelFailure(failure)
+            setSendError(null)
+            setResponseInterrupted(failure.interrupted || partial.length > 0)
+            setStreamingContent(partial ? streamingTextRef.current : null)
+          } else {
+            setStreamingContent(null)
+            setResponseInterrupted(false)
+            setSendError(errMessage || 'The model could not respond.')
+          }
+          queryClient.invalidateQueries({ queryKey: ['messages', conversationId] })
+        },
+      })
+    } catch (error) {
+      setIsSending(false)
+      setStreamingContent(null)
+      streamingConvRef.current = null
+      setStatusMessage(null)
+      setSendError(
+        error instanceof Error
+          ? error.message
+          : 'Could not reach the local AI. Check Diagnostics for details.',
+      )
+      if (conversationId) {
+        queryClient.invalidateQueries({ queryKey: ['messages', conversationId] })
+      }
+    }
+  }
+
+  const handleStop = () => {
+    abortRef.current?.abort()
+    setIsSending(false)
+    setStreamingContent(null)
+    streamingConvRef.current = null
+    setStatusMessage(null)
+    setPendingTool(null)
+    if (selectedId) {
+      queryClient.invalidateQueries({ queryKey: ['messages', selectedId] })
+    }
+  }
+
+  const handleDelete = (conversation: Conversation, event: MouseEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setListError(null)
+    // Native window.confirm is unreliable in the Wails WebView — use in-app confirm.
+    setPendingDelete(conversation)
+  }
+
+  const confirmDelete = () => {
+    if (!pendingDelete) return
+    deleteConversation.mutate(pendingDelete.id)
+  }
+
+  const startRename = (conversation: Conversation, event?: MouseEvent) => {
+    event?.stopPropagation()
+    setRenamingId(conversation.id)
+    setRenameValue(conversation.title)
+  }
+
+  const commitRename = () => {
+    if (!renamingId || !renameValue.trim()) {
+      setRenamingId(null)
+      return
+    }
+    updateConversation.mutate({ id: renamingId, title: renameValue.trim() })
+  }
+
+  const startNewChat = () => {
+    setSelectedId(null)
+    setSendError(null)
+    setCapabilityNotice(null)
+    setToolFailure(null)
+    setToolTraces([])
+    setToolDetailsOpen(false)
+    setStreamingContent(null)
+    setTeamSteps([])
+    setDraft('')
+    setListError(null)
+    if (defaultExecution === 'ask') {
+      setRunMode(null)
+      setExecutionAsked(false)
+    }
+    if (!(chatHistoryPinned && canPinHistory)) {
+      setHistoryOpen(false)
+    }
+    composerRef.current?.focus()
+  }
+
+  useEffect(() => {
+    if (chatHistoryPinned && canPinHistory) {
+      setHistoryOpen(true)
+    }
+  }, [chatHistoryPinned, canPinHistory])
+
+  const messages = messagesQuery.data ?? []
+  const streamingText = streamingContent == null ? '' : displayChatText(streamingContent)
+  const replyInProgress = isSending && streamingText.length === 0
+  const showLanding = !selectedId && !draft.trim() && !isSending
+  const historyMode = chatHistoryPinned && canPinHistory ? 'pinned' : 'overlay'
+  const showPinnedSidebar = historyOpen && historyMode === 'pinned'
+
+  const runOnTitle =
+    effectiveRunMode === 'automatic'
+      ? 'Norn chooses the best available computer.'
+      : 'Run only on this computer.'
+
+  const historyDrawer = (
+    <ChatHistoryDrawer
+      open={historyOpen}
+      mode={historyMode}
+      conversations={conversations}
+      pinnedIds={pinnedConversationIds}
+      selectedId={selectedId}
+      loading={conversationsQuery.isLoading}
+      error={listError}
+      drawerPinned={chatHistoryPinned}
+      canPinDrawer={canPinHistory}
+      renamingId={renamingId}
+      renameValue={renameValue}
+      onRenameValueChange={setRenameValue}
+      onCommitRename={commitRename}
+      onCancelRename={() => setRenamingId(null)}
+      onClose={() => setHistoryOpen(false)}
+      onNewChat={startNewChat}
+      onSelect={(id) => {
+        setSelectedId(id)
+        if (historyMode === 'overlay') {
+          setHistoryOpen(false)
+        }
+      }}
+      onRename={(conversation) => startRename(conversation)}
+      onTogglePin={togglePinnedConversation}
+      onDelete={handleDelete}
+      onToggleDrawerPinned={() => {
+        const next = !chatHistoryPinned
+        setChatHistoryPinned(next)
+        if (next && canPinHistory) {
+          setHistoryOpen(true)
+        }
+      }}
+    />
+  )
+
+  const composer = (
+    <form
+      className={['composer', showLanding ? 'composer-landing' : ''].filter(Boolean).join(' ')}
+      onSubmit={(event) => {
+        event.preventDefault()
+        void sendMessage()
+      }}
+    >
+      <textarea
+        ref={composerRef}
+        value={draft}
+        rows={showLanding ? 5 : 4}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault()
+            void sendMessage()
+          }
+        }}
+        placeholder="Ask Yggdrasil anything…"
+        disabled={isSending}
+        className="composer-input"
+        aria-label="Message"
+      />
+      <div className="composer-toolbar">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          <label className="composer-select" title="Which assistant style to use">
+            <span className="composer-select-label">Profile</span>
+            <span className="sr-only">Assistant profile</span>
+            <select
+              ref={profileSelectRef}
+              value={profileIdForChat ?? ''}
+              disabled={isSending || updateConversation.isPending}
+              onChange={(event) => setProfile(event.target.value)}
+            >
+              {sortedProfiles.map((profile: AIProfile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label
+            className={[
+              'composer-select',
+              defaultExecution === 'ask' && !executionAsked && runMode == null
+                ? 'ring-1 ring-primary/50'
+                : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+            title={runOnTitle}
+          >
+            <span className="composer-select-label">Run on</span>
+            <span className="sr-only">Run on</span>
+            <select
+              value={
+                runMode ??
+                (defaultExecution === 'ask' ? '' : effectiveRunMode)
+              }
+              disabled={isSending || updateConversation.isPending}
+              onChange={(event) => chooseRunMode(event.target.value as RunMode)}
+            >
+              {defaultExecution === 'ask' && runMode == null ? (
+                <option value="" disabled>
+                  Choose…
+                </option>
+              ) : null}
+              <option value="automatic">Automatic</option>
+              <option value="local">This computer</option>
+            </select>
+          </label>
+          <label className="composer-select" title="Which installed model answers this chat">
+            <span className="composer-select-label">Model</span>
+            <span className="sr-only">Model</span>
+            <select
+              ref={modelSelectRef}
+              value={modelIdForChat ?? ''}
+              disabled={isSending || installedModels.length === 0}
+              onChange={(event) => setModel(event.target.value)}
+            >
+              {installedModels.length === 0 ? (
+                <option value="">No model installed</option>
+              ) : (
+                installedModels.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.display_name || model.id}
+                  </option>
+                ))
+              )}
+            </select>
+          </label>
+        </div>
+        <ContextUsageButton
+          usage={contextUsage}
+          windowLimit={contextWindow(chatModel?.context)}
+        />
+        {isSending ? (
+          <button type="button" className="btn-secondary px-3 py-2" onClick={handleStop}>
+            Stop
+          </button>
+        ) : (
+          <button
+            type="submit"
+            className="btn-primary h-9 w-9 shrink-0 rounded-full p-0 text-lg leading-none"
+            disabled={!draft.trim()}
+            aria-label="Send"
+            title="Send"
+          >
+            ↑
+          </button>
+        )}
+      </div>
+            {chatModel && (
+          <p className="mt-2 text-xs text-ink-muted" title={chatToolAssessment?.detail}>
+            {chatModel.display_name || chatModel.id}
+            {capabilityLine.length > 0 ? ` · ${capabilityLine.join(' · ')}` : ''}
+          </p>
+        )}
+      {!modelIdForChat && (
+        <p className="mt-2 text-xs text-ink-muted">
+          No model installed yet — sending will{' '}
+          {downloadBehavior === 'ask' ? 'ask before downloading' : 'download automatically'}.{' '}
+          <Link to="/models" className="font-medium text-primary underline-offset-2 hover:underline">
+            Open Models
+          </Link>
+        </p>
+      )}
+      {defaultExecution === 'ask' && !executionAsked && runMode == null && (
+        <p className="mt-2 text-xs text-ink-muted">
+          Choose <span className="font-medium text-ink">Run on</span> before sending (Settings →
+          Run chats on).
+        </p>
+      )}
+    </form>
+  )
+
+  const suggestions = (
+    <div className="mt-5 flex flex-wrap justify-center gap-2">
+      <span className="self-center text-xs text-ink-faint">Try:</span>
+      {SUGGESTIONS.map((item) => (
+        <button
+          key={item.label}
+          type="button"
+          className="chat-suggestion"
+          onClick={() => void sendMessage(item.prompt)}
+          disabled={isSending}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  )
+
+  return (
+    <div className="page-fill gap-0">
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+        {showPinnedSidebar ? historyDrawer : null}
+
+        <section className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-panel bg-canvas/40 px-1 sm:px-2">
+          <div className="flex shrink-0 items-center gap-2 px-1 pb-2 pt-1">
+            <button
+              type="button"
+              className={[
+                'inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm font-medium transition',
+                historyOpen && historyMode === 'overlay'
+                  ? 'bg-primary-soft text-primary-active'
+                  : 'text-ink-muted hover:bg-raised hover:text-ink',
+              ].join(' ')}
+              aria-expanded={historyOpen}
+              aria-controls="chat-history-drawer"
+              onClick={() => setHistoryOpen((open) => !open)}
+            >
+              <span aria-hidden className="text-base leading-none">
+                ☰
+              </span>
+              History
+            </button>
+            <button
+              type="button"
+              className="btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
+              title="New chat"
+              onClick={startNewChat}
+            >
+              <span aria-hidden>+</span>
+              New chat
+            </button>
+
+            {selectedId ? (
+              <div className="ml-auto flex min-w-0 items-center gap-2">
+                <h2 className="min-w-0 truncate font-display text-base font-semibold text-ink sm:text-lg">
+                  {selectedConversation?.title || 'Chat'}
+                </h2>
+                <p className="hidden shrink-0 text-xs text-ink-faint sm:inline" title={runOnTitle}>
+                  {activeProfile?.name ?? 'Assistant'}
+                  <span className="mx-1.5 text-ink-faint/60">·</span>
+                  {effectiveRunMode === 'automatic' ? 'Automatic' : 'This computer'}
+                </p>
+                {selectedConversation && (
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-md px-2 py-1 text-xs text-ink-faint transition hover:bg-danger/15 hover:text-danger"
+                    title="Delete chat"
+                    aria-label="Delete chat"
+                    onClick={(e) => handleDelete(selectedConversation, e)}
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
+            ) : null}
+          </div>
+
+          {!showPinnedSidebar && historyMode === 'overlay' ? historyDrawer : null}
+
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            <div
+              className={[
+                'chat-landing-hero flex flex-col items-center px-4',
+                showLanding
+                  ? 'flex-1 justify-end pb-2 pt-[min(12vh,5rem)]'
+                  : 'chat-landing-hero-exit',
+              ].join(' ')}
+              aria-hidden={!showLanding}
+            >
+              <img
+                src="/yggdrasil-mark.png"
+                alt=""
+                width={56}
+                height={56}
+                className="mb-5 h-14 w-14 object-contain opacity-95"
+                decoding="async"
+              />
+              <h1 className="font-display text-2xl font-semibold tracking-tight text-ink sm:text-3xl">
+                What can I help you with?
+              </h1>
+              <p className="mt-2 max-w-md text-center text-sm text-ink-muted">
+                Talk to your local AI. Yggdrasil picks the right resources automatically.
+              </p>
+            </div>
+
+            {selectedId ? (
+              <div className="relative min-h-0 flex-1">
+                <div
+                  ref={scrollerRef}
+                  className="absolute inset-0 overflow-y-auto px-1 pb-2 [overflow-anchor:none]"
+                >
+                  <div ref={contentRef} className="space-y-4">
+                {messagesQuery.isLoading && <LoadingSpinner />}
+                {messages.map((message) => {
+                  const text = displayChatText(message.content)
+                  if (message.role === 'assistant' && !text) return null
+                  return (
+                  <div
+                    key={message.id}
+                    className={[
+                      'max-w-[min(42rem,85%)] break-words rounded-2xl px-4 py-3 text-[15px] leading-relaxed',
+                      message.role === 'user'
+                        ? 'ml-auto bg-primary text-primary-fg'
+                        : 'bg-raised/80 text-ink',
+                    ].join(' ')}
+                  >
+                    {message.role === 'assistant' ? (
+                      <ChatMarkdown text={text} />
+                    ) : (
+                      <span className="whitespace-pre-wrap">{text}</span>
+                    )}
+                  </div>
+                  )
+                })}
+
+                {teamSteps.length > 0 && (
+                  <ol className="max-w-[min(42rem,85%)] space-y-1.5 border-l-2 border-primary/30 pl-3">
+                    {teamSteps.map((step) => (
+                      <li key={step.role} className="text-sm text-ink-muted">
+                        <span className="font-medium text-ink">
+                          {formatRoleLabel(step.role)}
+                        </span>
+                        {step.nodeName ? (
+                          <span>
+                            {' '}
+                            on <span className="text-info">{step.nodeName}</span>
+                          </span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ol>
+                )}
+
+                {toolFailure && !isSending && !statusMessage && (
+                  <p className="text-sm text-ink-muted">
+                    {toolFailure} failed
+                    {' · '}
+                    <button
+                      type="button"
+                      className="text-primary underline-offset-2 hover:underline"
+                      onClick={() => void sendMessage(lastUserMessageRef.current)}
+                    >
+                      Retry
+                    </button>
+                  </p>
+                )}
+                {toolTraces.length > 0 && (
+                  <div className="max-w-[min(42rem,85%)] text-xs text-ink-muted">
+                    <button
+                      type="button"
+                      className="underline-offset-2 hover:underline"
+                      onClick={() => setToolDetailsOpen((open) => !open)}
+                    >
+                      Used {toolTraces.length} tool{toolTraces.length === 1 ? '' : 's'} {toolDetailsOpen ? '▾' : '▸'}
+                    </button>
+                    {toolDetailsOpen && (
+                      <ul className="mt-2 space-y-1">
+                        {toolTraces.map((trace, index) => (
+                          <li key={`${trace.label}-${index}`}>
+                            <span className="font-medium text-ink">{trace.label}</span>
+                            {trace.detail ? ` — ${trace.detail}` : ''}
+                            <span className="text-ink-faint"> · {trace.status}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+
+                {streamingText ? (
+                  <div className="max-w-[min(42rem,85%)] break-words rounded-2xl bg-raised/80 px-4 py-3 text-[15px] leading-relaxed text-ink">
+                    <ChatMarkdown text={streamingText} />
+                    {responseInterrupted && !isSending ? (
+                      <p className="mt-2 text-xs text-ink-muted">Response interrupted</p>
+                    ) : null}
+                    {isSending && (
+                      <span className="chat-caret ml-0.5 inline-block h-4 w-0.5 bg-primary align-middle" />
+                    )}
+                  </div>
+                ) : null}
+
+                {capabilityNotice && (
+                  <CapabilityNotice
+                    gap={capabilityNotice}
+                    onUse={(modelId) => {
+                      setModel(modelId)
+                      setCapabilityNotice(null)
+                    }}
+                    onEnableInternet={() => void enableInternet()}
+                  />
+                )}
+                {modelFailure ? (
+                  <ModelFailureNotice
+                    failure={modelFailure}
+                    advanced={advancedMode}
+                    onRetry={() => {
+                      setModelFailure(null)
+                      setResponseInterrupted(false)
+                      void sendMessage(lastUserMessageRef.current)
+                    }}
+                    onChooseModel={() => {
+                      ;(profileSelectRef.current ?? modelSelectRef.current)?.focus()
+                    }}
+                  />
+                ) : null}
+                {sendError && (
+                  <div className="rounded-lg bg-danger/10 px-4 py-3 text-sm text-danger">
+                    {sendError}
+                  </div>
+                )}
+                  </div>
+                </div>
+                {showJump ? (
+                  <button
+                    type="button"
+                    className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full border border-line/80 bg-surface/95 px-3 py-1 text-xs font-medium text-ink-muted shadow-panel backdrop-blur transition hover:text-ink"
+                    onClick={jumpToLatest}
+                  >
+                    <span aria-hidden>↓ </span>
+                    Latest
+                  </button>
+                ) : null}
+              </div>
+            ) : (
+              !showLanding && <div className="min-h-0 flex-1" aria-hidden />
+            )}
+
+            <div
+              className={[
+                'mx-auto w-full max-w-2xl px-2 transition-[margin,padding] duration-300 ease-out sm:px-4',
+                showLanding ? 'mb-1 mt-10 pb-2' : 'mt-auto pb-1 pt-2',
+              ].join(' ')}
+            >
+              {replyInProgress ? (
+                <div className="mb-3 px-1">
+                  <ChatActivity label={statusMessage} />
+                </div>
+              ) : null}
+              {composer}
+              {showLanding ? suggestions : null}
+              {!selectedId && capabilityNotice ? (
+                <div className="mt-3">
+                  <CapabilityNotice
+                    gap={capabilityNotice}
+                    onUse={(modelId) => {
+                      setModel(modelId)
+                      setCapabilityNotice(null)
+                    }}
+                    onEnableInternet={() => void enableInternet()}
+                  />
+                </div>
+              ) : null}
+              {!selectedId && modelFailure ? (
+                <div className="mt-3">
+                  <ModelFailureNotice
+                    failure={modelFailure}
+                    advanced={advancedMode}
+                    onRetry={() => {
+                      setModelFailure(null)
+                      setResponseInterrupted(false)
+                      void sendMessage(lastUserMessageRef.current)
+                    }}
+                    onChooseModel={() => {
+                      ;(profileSelectRef.current ?? modelSelectRef.current)?.focus()
+                    }}
+                  />
+                </div>
+              ) : null}
+              {!selectedId && sendError ? (
+                <p className="mt-3 text-center text-sm text-danger">{sendError}</p>
+              ) : null}
+            </div>
+          </div>
+        </section>
+      </div>
+
+      {pendingDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 p-4 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-chat-title"
+        >
+          <div className="card w-full max-w-sm space-y-4 shadow-panel">
+            <div>
+              <h2
+                id="delete-chat-title"
+                className="font-display text-lg font-semibold text-ink"
+              >
+                Delete this chat?
+              </h2>
+              <p className="mt-1 break-words text-sm text-ink-muted">
+                “{pendingDelete.title || 'Untitled'}” will be removed permanently.
+              </p>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={deleteConversation.isPending}
+                onClick={() => setPendingDelete(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-danger"
+                disabled={deleteConversation.isPending}
+                onClick={confirmDelete}
+              >
+                {deleteConversation.isPending ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingTool && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 p-4 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="tool-permission-title"
+        >
+          <div className="card w-full max-w-md space-y-4 shadow-panel">
+            <div>
+              <h2
+                id="tool-permission-title"
+                className="font-display text-lg font-semibold text-ink"
+              >
+                Allow {toolDisplayName(pendingTool.toolId)}?
+              </h2>
+              <p className="mt-1 text-sm text-ink-muted">
+                {pendingTool.reason ||
+                  'The assistant wants to use a local tool to continue.'}
+              </p>
+            </div>
+            <p className="break-words text-sm text-ink">{pendingTool.argsSummary}</p>
+            {advancedMode && pendingTool.rawArgs && (
+              <pre className="log-panel max-h-40">{pendingTool.rawArgs}</pre>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={toolDeciding}
+                onClick={() => void decidePendingTool(true, false)}
+              >
+                Allow once
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={toolDeciding}
+                onClick={() => void decidePendingTool(true, true)}
+              >
+                Allow for session
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={toolDeciding}
+                onClick={() => void decidePendingTool(false)}
+              >
+                Deny
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

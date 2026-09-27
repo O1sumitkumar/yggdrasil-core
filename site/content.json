@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "title": "Yggdrasil",
+  "description": "Talk to local models, search the web, read files, and use the computers you already have. Yggdrasil is the desktop app that keeps that simple.",
+  "layoutDescription": "Yggdrasil runs local models on the computers you already own, with a normal chat, web and file tools, and a desktop app for Mac, Windows, and Linux.",
+  "footer": "A local AI control plane from Yeix.",
+  "issuesLabel": "Bugs and ideas",
+  "about": {
+    "eyebrow": "Local AI control plane",
+    "headline": "Your computers. Your models. A chat that just answers.",
+    "lead": "Yggdrasil is a desktop app for Mac, Windows, and Linux. It runs models on the machines you already have, searches the web and reads files when that helps, and stays a conversation instead of a toolchain.",
+    "highlights": [
+      {
+        "title": "Stays on your machines",
+        "text": "The daemon runs locally. The web stays off until you turn Internet on."
+      },
+      {
+        "title": "Tools without the protocol",
+        "text": "Search, pages, files, shell, and git show up as status, not JSON in the reply."
+      },
+      {
+        "title": "A build for each release",
+        "text": "Desktop and server packages are published from CI and listed on the download page."
+      }
+    ],
+    "shots": [
+      {
+        "src": "/yggdrasil/chat.jpg",
+        "title": "A normal chat",
+        "text": "Ask in plain language. Answers come back as Markdown, and a web search shows up as a short status instead of raw tool syntax."
+      },
+      {
+        "src": "/yggdrasil/models.jpg",
+        "title": "Models you can actually run",
+        "text": "See what fits this computer, install it, and let Automatic pick one that can use tools when the question needs live information."
+      },
+      {
+        "src": "/yggdrasil/computers.jpg",
+        "title": "More than one computer",
+        "text": "Pair machines on your network and let a harder job use another computer you already own."
+      },
+      {
+        "src": "/yggdrasil/api.jpg",
+        "title": "A local API when you want one",
+        "text": "The same daemon speaks an OpenAI-compatible API on this machine. LAN access stays off until you turn it on."
+      }
+    ]
+  },
+  "download": {
+    "title": "Download",
+    "description": "Download the latest Yggdrasil desktop and server builds published by CI.",
+    "intro": "These files are the builds CI publishes to the public core repository. A new tag replaces this list within a few minutes.",
+    "empty": "No release packages are listed right now.",
+    "issuesPrompt": "Found a bug or want something added?"
+  }
+}

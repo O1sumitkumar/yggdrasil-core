@@ -1,0 +1,145 @@
+package profiles
+
+import (
+	"strings"
+
+	"github.com/yeixio/yggdrasil-core/pkg/contracts"
+)
+
+// PresetIDs for built-in profile templates.
+const (
+	PresetGeneral     = "general-assistant"
+	PresetProgramming = "programming"
+	PresetResearch    = "research"
+	PresetCustom      = "custom"
+)
+
+// IsPreset reports whether id is a built-in profile template.
+func IsPreset(id string) bool {
+	switch id {
+	case PresetGeneral, PresetProgramming, PresetResearch, PresetCustom:
+		return true
+	default:
+		return false
+	}
+}
+
+// BuiltInPresets returns default profile templates.
+func BuiltInPresets() []Profile {
+	return []Profile{
+		{
+			ID:             PresetGeneral,
+			Name:           "General Assistant",
+			Purpose:        "general",
+			OrchestratorID: "simple",
+			NodePolicy:     contracts.NodePolicy{Mode: "automatic"},
+			Roles: []contracts.ModelRole{
+				{Role: "assistant", Required: false},
+			},
+			Tools: defaultToolPolicies(),
+		},
+		{
+			ID:             PresetProgramming,
+			Name:           "Programming",
+			Purpose:        "coding",
+			OrchestratorID: "team",
+			NodePolicy:     contracts.NodePolicy{Mode: "automatic"},
+			Roles: []contracts.ModelRole{
+				{Role: "coordinator", Required: false},
+				{Role: "worker", Required: false},
+				{Role: "reviewer", Required: false},
+			},
+			Tools: codingToolPolicies(),
+		},
+		{
+			ID:             PresetResearch,
+			Name:           "Research",
+			Purpose:        "research",
+			OrchestratorID: "simple",
+			NodePolicy:     contracts.NodePolicy{Mode: "automatic"},
+			Roles: []contracts.ModelRole{
+				{Role: "researcher", Required: false},
+			},
+			Tools: researchToolPolicies(),
+		},
+		{
+			ID:             PresetCustom,
+			Name:           "Custom",
+			Purpose:        "custom",
+			OrchestratorID: "simple",
+			NodePolicy:     contracts.NodePolicy{Mode: "manual"},
+			Roles: []contracts.ModelRole{
+				{Role: "assistant", Required: false},
+			},
+			Tools: offlineToolPolicies(),
+		},
+	}
+}
+
+func defaultToolPolicies() []contracts.ToolPolicy {
+	return generalToolPolicies()
+}
+
+func generalToolPolicies() []contracts.ToolPolicy {
+	return []contracts.ToolPolicy{
+		{ToolID: "internet.search", Policy: "allow"},
+		{ToolID: "internet.open", Policy: "allow"},
+		{ToolID: "filesystem.search", Policy: "allow"},
+		{ToolID: "filesystem.read", Policy: "allow"},
+		{ToolID: "filesystem.write", Policy: "allow"},
+		{ToolID: "terminal", Policy: "allow"},
+		{ToolID: "git.status", Policy: "allow"},
+		{ToolID: "git.diff", Policy: "allow"},
+		{ToolID: "git.log", Policy: "allow"},
+		{ToolID: "git.show", Policy: "allow"},
+		{ToolID: "git.add", Policy: "allow"},
+		{ToolID: "git.commit", Policy: "allow"},
+		{ToolID: "git.push", Policy: "allow"},
+	}
+}
+
+func codingToolPolicies() []contracts.ToolPolicy {
+	return []contracts.ToolPolicy{
+		{ToolID: "internet.search", Policy: "allow"},
+		{ToolID: "internet.open", Policy: "allow"},
+		{ToolID: "filesystem.search", Policy: "allow"},
+		{ToolID: "filesystem.read", Policy: "allow"},
+		{ToolID: "filesystem.write", Policy: "allow"},
+		{ToolID: "terminal", Policy: "allow"},
+		{ToolID: "git.status", Policy: "allow"},
+		{ToolID: "git.diff", Policy: "allow"},
+		{ToolID: "git.log", Policy: "allow"},
+		{ToolID: "git.show", Policy: "allow"},
+		{ToolID: "git.add", Policy: "allow"},
+		{ToolID: "git.commit", Policy: "allow"},
+		{ToolID: "git.push", Policy: "allow"},
+	}
+}
+
+func researchToolPolicies() []contracts.ToolPolicy {
+	return []contracts.ToolPolicy{
+		{ToolID: "internet.search", Policy: "allow"},
+		{ToolID: "internet.open", Policy: "allow"},
+		{ToolID: "filesystem.search", Policy: "allow"},
+		{ToolID: "filesystem.read", Policy: "allow"},
+		{ToolID: "filesystem.write", Policy: "allow"},
+		{ToolID: "terminal", Policy: "deny"},
+		{ToolID: "git.status", Policy: "allow"},
+		{ToolID: "git.diff", Policy: "deny"},
+		{ToolID: "git.add", Policy: "deny"},
+		{ToolID: "git.commit", Policy: "deny"},
+		{ToolID: "git.push", Policy: "deny"},
+	}
+}
+
+func offlineToolPolicies() []contracts.ToolPolicy {
+	policies := generalToolPolicies()
+	for i := range policies {
+		if strings.HasPrefix(policies[i].ToolID, "filesystem.") {
+			policies[i].Policy = "allow"
+			continue
+		}
+		policies[i].Policy = "deny"
+	}
+	return policies
+}

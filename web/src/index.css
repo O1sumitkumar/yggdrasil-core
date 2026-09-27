@@ -1,0 +1,463 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Yggdrasil design system
+  Identity: winter night + fjord water + aurora + old Norse metalwork
+  Dark is the primary brand surface; light mirrors it with cool gray-blue daylight.
+*/
+
+:root,
+[data-theme='light'] {
+  /* Cool gray-blue daylight — same product as dark, not generic SaaS white */
+  --color-canvas: 240 244 248; /* #F0F4F8 — slightly lighter work surface */
+  --color-surface: 248 251 253; /* #F8FBFD */
+  --color-raised: 226 233 240; /* #E2E9F0 */
+  --color-sidebar: 228 234 240; /* #E4EAF0 — slightly deeper chrome */
+  --color-line: 196 208 220; /* #C4D0DC — stronger card edges */
+  --color-ink: 18 28 38; /* #121C26 */
+  --color-ink-muted: 88 106 122; /* #586A7A */
+  --color-ink-faint: 104 117 131; /* #687583 */
+  --color-primary: 22 124 120; /* #167C78 — buttons / focus / indicators */
+  --color-primary-hover: 18 104 100;
+  --color-primary-soft: 230 244 242; /* #E6F4F2 — muted selection fills */
+  --color-primary-active-text: 21 94 90; /* #155E5A */
+  --color-primary-fg: 255 255 255;
+  --color-accent: 154 116 51; /* #9A7433 muted gold */
+  --color-accent-soft: 240 232 214;
+  --color-success: 47 143 110;
+  --color-warning: 184 130 48;
+  --color-danger: 196 84 84;
+  --color-info: 74 130 180;
+  --color-shadow: 40 60 80;
+  --shadow-panel: 0 1px 2px rgb(40 60 80 / 0.06), 0 8px 24px -8px rgb(40 60 80 / 0.14);
+  --aurora-primary-alpha: 0.08;
+  --aurora-accent-alpha: 0.04;
+  --aurora-info-alpha: 0.05;
+}
+
+[data-theme='dark'] {
+  --color-canvas: 14 19 26; /* #0E131A — hair lighter than chrome */
+  --color-surface: 17 24 33; /* #111821 */
+  --color-raised: 24 34 46; /* #18222E */
+  --color-sidebar: 8 11 16; /* #080B10 — slightly deeper app chrome */
+  --color-line: 39 51 65; /* #273341 */
+  --color-ink: 238 242 246; /* #EEF2F6 */
+  --color-ink-muted: 154 167 181; /* #9AA7B5 */
+  --color-ink-faint: 104 117 131; /* #687583 */
+  --color-primary: 79 209 197; /* #4FD1C5 — bright: buttons / rings / dots */
+  --color-primary-hover: 109 224 214; /* #6DE0D6 */
+  --color-primary-soft: 18 56 58; /* #12383A — muted selection fill */
+  --color-primary-active-text: 109 224 214; /* #6DE0D6 */
+  --color-primary-fg: 11 15 20;
+  --color-accent: 198 161 91; /* #C6A15B */
+  --color-accent-soft: 48 40 24;
+  --color-success: 95 191 143;
+  --color-warning: 216 166 87;
+  --color-danger: 217 104 104;
+  --color-info: 111 168 220;
+  --color-shadow: 0 0 0;
+  --shadow-panel: 0 1px 0 rgb(255 255 255 / 0.03), 0 12px 32px -16px rgb(0 0 0 / 0.55);
+  --aurora-primary-alpha: 0.12;
+  --aurora-accent-alpha: 0.06;
+  --aurora-info-alpha: 0.05;
+}
+
+@layer base {
+  html {
+    @apply h-full font-sans text-ink antialiased;
+    overflow: hidden;
+  }
+
+  body {
+    @apply h-full min-h-0 overflow-hidden bg-canvas text-ink;
+    background-image:
+      radial-gradient(
+        ellipse 80% 50% at 10% -10%,
+        rgb(var(--color-primary) / var(--aurora-primary-alpha)),
+        transparent 55%
+      ),
+      radial-gradient(
+        ellipse 55% 35% at 100% 0%,
+        rgb(var(--color-accent) / var(--aurora-accent-alpha)),
+        transparent 45%
+      ),
+      radial-gradient(
+        ellipse 50% 30% at 85% 100%,
+        rgb(var(--color-info) / var(--aurora-info-alpha)),
+        transparent 50%
+      );
+  }
+
+  #root {
+    @apply h-full min-h-0 min-w-0 overflow-hidden;
+  }
+
+  ::selection {
+    background: rgb(var(--color-primary) / 0.28);
+    color: rgb(var(--color-ink));
+  }
+
+  /* Kill browser default blue focus — brand teal everywhere */
+  :focus {
+    outline: none;
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(var(--color-primary));
+    outline-offset: 2px;
+  }
+
+  button:focus-visible,
+  a:focus-visible,
+  [role='switch']:focus-visible {
+    outline-offset: 3px;
+  }
+}
+
+@layer components {
+  .card {
+    @apply min-w-0 rounded-xl bg-surface p-5;
+    box-shadow: var(--shadow-panel);
+  }
+
+  .card-outline {
+    @apply min-w-0 rounded-xl border border-line/70 bg-surface p-5;
+    box-shadow: var(--shadow-panel);
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-fg transition duration-150 hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary:focus-visible {
+    outline: 2px solid rgb(var(--color-primary));
+    outline-offset: 3px;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center rounded-lg bg-raised/80 px-4 py-2.5 text-sm font-semibold text-ink transition duration-150 hover:bg-raised disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center rounded-lg bg-danger/10 px-4 py-2.5 text-sm font-semibold text-danger transition duration-150 hover:bg-danger/20 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .nav-link {
+    @apply flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-ink-muted transition duration-150 hover:bg-raised/60 hover:text-ink;
+  }
+
+  .nav-link-active {
+    @apply bg-primary-soft font-semibold hover:bg-primary-soft;
+    color: rgb(var(--color-primary-active-text));
+  }
+
+  .nav-link-active:hover {
+    color: rgb(var(--color-primary-active-text));
+  }
+
+  .nav-link-active:focus-visible {
+    outline-color: rgb(var(--color-primary));
+  }
+
+  .selectable {
+    @apply min-w-0 rounded-xl bg-surface p-4 text-left transition duration-150 hover:bg-raised/70;
+    box-shadow: inset 0 0 0 1px rgb(var(--color-line) / 0.55);
+  }
+
+  .selectable-active {
+    @apply bg-primary-soft;
+    box-shadow: inset 0 0 0 1.5px rgb(var(--color-primary) / 0.45);
+  }
+
+  .selectable-active > .font-semibold,
+  .selectable-active .selectable-title {
+    color: rgb(var(--color-primary-active-text));
+  }
+
+  .field {
+    @apply rounded-lg border border-line/70 bg-surface px-4 py-2.5 text-sm text-ink outline-none placeholder:text-ink-faint disabled:opacity-60;
+  }
+
+  .field:focus,
+  .field:focus-visible {
+    outline: none;
+    border-color: rgb(var(--color-primary));
+    box-shadow: 0 0 0 3px rgb(var(--color-primary) / 0.22);
+  }
+
+  .composer {
+    @apply rounded-2xl bg-surface p-3.5;
+    box-shadow: var(--shadow-panel), inset 0 0 0 1px rgb(var(--color-line) / 0.45);
+  }
+
+  .composer-input {
+    @apply w-full resize-none border-0 bg-transparent px-2 py-2 text-[15px] leading-relaxed text-ink outline-none placeholder:text-ink-faint disabled:opacity-60;
+    min-height: 7.5rem; /* ~120px — generous multi-line prompt */
+  }
+
+  .composer-landing .composer-input {
+    min-height: 8.75rem; /* ~140px on the empty landing */
+  }
+
+  .composer-toolbar {
+    @apply mt-2.5 flex items-center gap-2 border-t border-line/40 pt-2.5;
+  }
+
+  .composer-select {
+    @apply inline-flex items-center gap-1.5;
+  }
+
+  .composer-select-label {
+    @apply hidden text-[11px] font-medium text-ink-faint sm:inline;
+  }
+
+  .composer-select select {
+    @apply max-w-[12rem] truncate rounded-md bg-raised/70 px-2 py-1.5 text-xs font-medium text-ink outline-none transition hover:bg-raised;
+  }
+
+  .composer-select select:focus-visible {
+    outline: 2px solid rgb(var(--color-primary));
+    outline-offset: 1px;
+  }
+
+  .chat-suggestion {
+    @apply rounded-full border border-line/80 bg-raised/40 px-3.5 py-1.5 text-xs font-medium text-ink/85 transition;
+  }
+
+  .chat-suggestion:hover {
+    @apply border-primary/50 bg-raised text-ink;
+  }
+
+  .chat-suggestion:focus-visible {
+    outline: 2px solid rgb(var(--color-primary));
+    outline-offset: 2px;
+  }
+
+  .chat-landing-hero {
+    transition:
+      opacity 280ms ease,
+      transform 280ms ease,
+      max-height 280ms ease,
+      margin 280ms ease,
+      padding 280ms ease;
+  }
+
+  .chat-landing-hero-exit {
+    @apply pointer-events-none m-0 max-h-0 overflow-hidden p-0 opacity-0;
+    transform: translateY(-14px);
+  }
+
+  .chat-list-search {
+    @apply w-full border-0 bg-transparent px-2 py-1.5 text-xs text-ink-muted outline-none placeholder:text-ink-faint/80;
+    box-shadow: none;
+  }
+
+  .chat-list-search:focus,
+  .chat-list-search:focus-visible {
+    @apply text-ink;
+    box-shadow: none;
+    border-color: transparent;
+  }
+
+  .status-chip {
+    @apply inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-medium;
+  }
+
+  .badge-preferred {
+    @apply status-chip bg-accent-soft text-accent;
+  }
+
+  .badge-mimir {
+    @apply status-chip bg-mimir/15 text-mimir;
+  }
+
+  .label-caps {
+    @apply text-[10px] font-medium uppercase tracking-[0.14em] text-ink-faint;
+  }
+
+  .page-header {
+    @apply space-y-1;
+  }
+
+  .page-title {
+    @apply font-display text-[1.75rem] font-semibold tracking-tight text-ink sm:text-[2rem];
+  }
+
+  .page-subtitle {
+    @apply text-[15px] leading-relaxed text-ink-muted;
+  }
+
+  .section-title {
+    @apply font-display text-lg font-semibold text-ink;
+  }
+
+  .settings-group {
+    @apply space-y-3;
+  }
+
+  .settings-group-label {
+    @apply label-caps px-1;
+  }
+
+  .animate-fade {
+    animation: ygg-fade 150ms ease-out;
+  }
+
+  .empty-hero {
+    @apply flex flex-col items-start gap-2 py-2;
+  }
+
+  /* —— Layout containment (app shell / page / log / table) —— */
+
+  .app-shell {
+    @apply flex h-full min-h-0 min-w-0 overflow-hidden;
+  }
+
+  .page-scroll {
+    @apply min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto;
+  }
+
+  /* Fill-height routes (Chat) consume the page region without growing the shell */
+  .page-scroll > .page-fill {
+    height: 100%;
+    max-height: 100%;
+  }
+
+  .page-fill {
+    @apply flex h-full min-h-0 min-w-0 flex-col overflow-hidden;
+  }
+
+  .log-panel {
+    @apply min-h-0 min-w-0 max-w-full overflow-auto whitespace-pre break-normal rounded-lg bg-canvas p-4 font-mono text-xs leading-relaxed text-ink;
+  }
+
+  .table-scroll {
+    @apply max-w-full min-w-0 overflow-x-auto;
+  }
+
+  .break-anywhere {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .mono-id {
+    @apply max-w-full min-w-0 truncate font-mono text-xs;
+  }
+}
+
+@keyframes ygg-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes ygg-chat-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.28;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes ygg-caret {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0.15;
+  }
+}
+
+@keyframes ygg-boot-pulse {
+  0%,
+  100% {
+    opacity: 0.72;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@layer utilities {
+  .animate-boot-pulse {
+    animation: ygg-boot-pulse 1.6s ease-in-out infinite;
+  }
+
+  .animate-chat-drawer {
+    animation: ygg-chat-drawer 180ms ease-out;
+  }
+
+  .chat-activity-dot {
+    @apply h-1.5 w-1.5 rounded-full bg-primary;
+    animation: ygg-chat-dot 1.05s ease-in-out infinite;
+  }
+
+  .chat-activity-dot:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+
+  .chat-activity-dot:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+
+  .chat-caret {
+    animation: ygg-caret 1s steps(1) infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .chat-activity-dot,
+    .chat-caret {
+      animation: none;
+    }
+
+    .chat-activity-dot {
+      opacity: 0.85;
+    }
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+}
+
+@keyframes ygg-chat-drawer {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+html[data-screenshot='1'],
+html[data-screenshot='1'] *,
+html[data-screenshot='1'] *::before,
+html[data-screenshot='1'] *::after {
+  animation: none !important;
+  transition: none !important;
+  caret-color: transparent !important;
+}

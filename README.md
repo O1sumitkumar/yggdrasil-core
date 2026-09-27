@@ -1,25 +1,45 @@
-# Yggdrasil releases
+# Yggdrasil core
 
-This repository publishes Yggdrasil builds and accepts bugs and feature requests. The application source stays private.
+Local AI daemon and web UI for macOS, Windows, and Linux.
 
-## Download
+The daemon runs on this computer, serves the web UI, installs local models, and exposes an OpenAI-compatible API on loopback. Desktop installers are built separately and are not part of this repository.
 
-Installers are attached to [Releases](https://github.com/yeixio/yggdrasil-releases/releases). The project site lists the latest files at [yggdrasil.yeix.io/download](https://yggdrasil.yeix.io/download).
+Copyright (C) 2026 YEIXIO LLC. Licensed under the GNU Affero General Public License, version 3 or any later version. See [LICENSE](./LICENSE).
 
-Do not commit zip or tar archives here. When a version tag is published, CI attaches the build files to a release.
+## Run it
 
-## Bugs and feature requests
+Requirements: Go 1.26+, Node 22+, pnpm 9+.
 
-Open an [issue](https://github.com/yeixio/yggdrasil-releases/issues) for a bug or a feature request.
+```bash
+make daemon
+./bin/yggdrasil-daemon
+```
 
-## Versioned documentation
+Open `http://127.0.0.1:7331`. The development UI proxy is `make run-web` at `http://127.0.0.1:5173`.
 
-The main app's release workflow publishes `docs/<version>.json` and updates
-`docs/index.json` here after a successful app release. The website reads this
-public index automatically and retains version-specific guides. Snapshots are
-immutable and contain only the public user guide, the release tag, and source
-commit provenance; the application source remains private.
+Headless package for this machine:
 
-Edit the current guide in the main app repository at `docs/user-guide/guide.json`
-before tagging a release. Do not hand-edit published snapshots or the index.
-The bootstrap alpha.23 snapshot preserves the existing public guide.
+```bash
+VERSION=1.0.0 make package-headless
+```
+
+## Documentation and website
+
+User documentation and the public site copy live in this repository.
+
+| Path | Purpose |
+|------|---------|
+| [docs/user-guide/guide.json](./docs/user-guide/guide.json) | Editable user guide |
+| [docs/index.json](./docs/index.json) | Versions the website lists |
+| `docs/<version>.json` | Frozen guide for one release |
+| [site/content.json](./site/content.json) | Public site copy |
+| [docs/capabilities.md](./docs/capabilities.md) | Internet, Files, Shell, and Git |
+| [docs/tools.md](./docs/tools.md) | Tool registry and permissions |
+
+The site at `https://yggdrasil.yeix.io` reads the version index, the guide snapshots, the latest GitHub release, and `site/content.json` from this repository.
+
+## License
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.

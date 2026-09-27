@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Yggdrasil
+GenericName=Local AI Control Plane
+Comment=Local AI control plane for your computers
+Exec=yggdrasil
+Icon=yggdrasil
+Terminal=false
+Categories=Utility;Development;
+StartupNotify=true
+Keywords=AI;LLM;local;llama;

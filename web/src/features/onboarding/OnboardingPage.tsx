@@ -1,0 +1,464 @@
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
+import { api } from '@/lib/api'
+import { subscribeEvents } from '@/lib/events'
+import { bytesToGb, formatBytes } from '@/lib/format'
+import {
+  buildProfileFromRecommendation,
+  presetOptions,
+  purposeToApiQuery,
+} from '@/lib/profilePresets'
+import { useUIStore } from '@/stores/uiStore'
+import type { ModelDownloadProgressPayload, Purpose, Recommendation } from '@/types/api'
+
+type OnboardingStep = 'setup' | 'recommend' | 'installing' | 'ready'
+
+type InstallPhase =
+  | 'runtime'
+  | 'models'
+  | 'profile'
+  | 'conversation'
+  | 'done'
+
+export function OnboardingPage() {
+  const navigate = useNavigate()
+  const setOnboardingComplete = useUIStore((s) => s.setOnboardingComplete)
+  const setActiveProfileId = useUIStore((s) => s.setActiveProfileId)
+
+  const [step, setStep] = useState<OnboardingStep>('setup')
+  const [selectedPurpose, setSelectedPurpose] = useState<Purpose>('general')
+  const [recommendation, setRecommendation] = useState<Recommendation | null>(null)
+  const [installError, setInstallError] = useState<string | null>(null)
+  const [phase, setPhase] = useState<InstallPhase>('runtime')
+  const [phaseDetail, setPhaseDetail] = useState('')
+  const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({})
+  const [readyConversationId, setReadyConversationId] = useState<string | null>(null)
+
+  const hardwareQuery = useQuery({
+    queryKey: ['hardware'],
+    queryFn: () => api.getHardware(),
+    retry: false,
+  })
+
+  const recommendMutation = useMutation({
+    mutationFn: () => api.recommendModels(purposeToApiQuery(selectedPurpose)),
+    onSuccess: (rec) => {
+      if (rec) {
+        setRecommendation(rec)
+        setStep('recommend')
+      }
+    },
+    onError: (error: Error) => {
+      setInstallError(error.message || 'Could not get a recommendation.')
+    },
+  })
+
+  useEffect(() => {
+    if (step !== 'installing') {
+      return
+    }
+    return subscribeEvents({
+      onEvent: (event) => {
+        if (event.type === 'model.download.progress') {
+          const payload = event.payload as ModelDownloadProgressPayload | undefined
+          if (!payload?.model_id) {
+            return
+          }
+          setDownloadProgress((current) => ({
+            ...current,
+            [payload.model_id]: payload.percent ?? 0,
+          }))
+          setPhaseDetail(`Downloading ${payload.model_id}… ${Math.round(payload.percent ?? 0)}%`)
+        }
+        if (event.type === 'model.download.completed') {
+          const modelId = event.payload?.model_id as string | undefined
+          if (modelId) {
+            setDownloadProgress((current) => ({ ...current, [modelId]: 100 }))
+          }
+        }
+        if (event.type === 'model.download.failed') {
+          const message = (event.payload?.error as string) || 'Model download failed.'
+          setInstallError(message)
+        }
+      },
+    })
+  }, [step])
+
+  const installMutation = useMutation({
+    mutationFn: async (rec: Recommendation) => {
+      setInstallError(null)
+      setStep('installing')
+      setDownloadProgress({})
+
+      setPhase('runtime')
+      setPhaseDetail('Installing the local model runtime…')
+      await api.installRuntime('llamacpp')
+
+      setPhase('models')
+      const uniqueModels = uniqueById(rec.models)
+      for (const model of uniqueModels) {
+        setPhaseDetail(`Installing ${model.display_name}…`)
+        await api.installModel(model.id, { wait: true })
+        setDownloadProgress((current) => ({ ...current, [model.id]: 100 }))
+      }
+
+      setPhase('profile')
+      setPhaseDetail('Creating your AI profile…')
+      const profileBody = buildProfileFromRecommendation(selectedPurpose, rec)
+      const profile = await api.createProfile(profileBody)
+      if (!profile?.id) {
+        throw new Error('Profile was created but no ID was returned.')
+      }
+      setActiveProfileId(profile.id)
+
+      setPhase('conversation')
+      setPhaseDetail('Preparing your first conversation…')
+      const conversation = await api.createConversation({
+        title: `${profile.name} chat`,
+        profile_id: profile.id,
+      })
+
+      setPhase('done')
+      return { profileId: profile.id, conversationId: conversation?.id ?? null }
+    },
+    onSuccess: (result) => {
+      setReadyConversationId(result.conversationId)
+      setStep('ready')
+    },
+    onError: (error: Error) => {
+      setInstallError(error.message || 'Installation failed.')
+      setStep('recommend')
+    },
+  })
+
+  const handleContinue = () => {
+    setInstallError(null)
+    if (selectedPurpose === 'custom') {
+      setOnboardingComplete(true)
+      navigate('/models')
+      return
+    }
+    recommendMutation.mutate()
+  }
+
+  const handleSkipInstall = () => {
+    setOnboardingComplete(true)
+    navigate('/chat')
+  }
+
+  const handleStartChatting = () => {
+    setOnboardingComplete(true)
+    if (readyConversationId) {
+      navigate(`/chat?c=${readyConversationId}`)
+    } else {
+      navigate('/chat')
+    }
+  }
+
+  const hardware = hardwareQuery.data
+  const acceleratorLabels =
+    hardware?.accelerators?.map((a) => a.model).filter(Boolean) ?? []
+
+  const overallProgress = useMemo(() => {
+    if (!recommendation || step !== 'installing') {
+      return 0
+    }
+    if (phase === 'runtime') {
+      return 5
+    }
+    if (phase === 'models') {
+      const ids = uniqueById(recommendation.models).map((m) => m.id)
+      if (ids.length === 0) {
+        return 40
+      }
+      const sum = ids.reduce((acc, id) => acc + (downloadProgress[id] ?? 0), 0)
+      return 10 + Math.round((sum / ids.length) * 0.75)
+    }
+    if (phase === 'profile') {
+      return 90
+    }
+    if (phase === 'conversation') {
+      return 96
+    }
+    return 100
+  }, [recommendation, step, phase, downloadProgress])
+
+  return (
+    <div className="mx-auto flex h-full min-h-0 w-full max-w-3xl flex-col justify-center overflow-y-auto px-6 py-12">
+      <header className="mb-10 text-center">
+        <img
+          src="/yggdrasil-mark.png"
+          alt=""
+          width={72}
+          height={72}
+          className="mx-auto mb-5 h-[72px] w-[72px] object-contain"
+          decoding="async"
+        />
+        <p className="mb-3 text-sm font-medium uppercase tracking-[0.18em] text-accent">
+          Welcome
+        </p>
+        <h1 className="font-display text-5xl font-semibold tracking-tight text-ink md:text-6xl">
+          Yggdrasil
+        </h1>
+        <p className="mx-auto mt-4 max-w-xl text-lg leading-relaxed text-ink-muted">
+          This app can run AI privately on your own computers.
+        </p>
+      </header>
+
+      {step === 'setup' && (
+        <>
+          <section className="card mb-6">
+            <h2 className="font-display text-xl font-semibold text-ink">This computer</h2>
+            <p className="mt-1 text-sm text-ink-muted">
+              Hardware detected for local inference.
+            </p>
+
+            <div className="mt-4">
+              {hardwareQuery.isLoading && <LoadingSpinner label="Detecting hardware…" />}
+              {hardware ? (
+                <dl className="grid gap-3 sm:grid-cols-2">
+                  {hardware.cpu?.model && (
+                    <div>
+                      <dt className="text-xs uppercase tracking-wide text-ink-muted">
+                        Processor
+                      </dt>
+                      <dd className="text-sm font-medium text-ink">
+                        {hardware.cpu.model}
+                        {hardware.cpu.cores ? ` · ${hardware.cpu.cores} cores` : ''}
+                      </dd>
+                    </div>
+                  )}
+                  {hardware.memory?.total_bytes != null && (
+                    <div>
+                      <dt className="text-xs uppercase tracking-wide text-ink-muted">Memory</dt>
+                      <dd className="text-sm font-medium text-ink">
+                        {bytesToGb(hardware.memory.total_bytes)}
+                      </dd>
+                    </div>
+                  )}
+                  {acceleratorLabels.length > 0 && (
+                    <div className="sm:col-span-2">
+                      <dt className="text-xs uppercase tracking-wide text-ink-muted">
+                        Graphics
+                      </dt>
+                      <dd className="text-sm font-medium text-ink">
+                        {acceleratorLabels.join(', ')}
+                      </dd>
+                    </div>
+                  )}
+                  {hardware.os && (
+                    <div>
+                      <dt className="text-xs uppercase tracking-wide text-ink-muted">System</dt>
+                      <dd className="text-sm font-medium text-ink">
+                        {hardware.os} / {hardware.arch}
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+              ) : (
+                !hardwareQuery.isLoading && (
+                  <p className="text-sm text-ink-muted">
+                    Hardware details will appear once the app backend is running. You can
+                    continue setup now.
+                  </p>
+                )
+              )}
+            </div>
+          </section>
+
+          <section className="card mb-8">
+            <h2 className="font-display text-xl font-semibold text-ink">
+              What would you like your AI to do?
+            </h2>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {presetOptions.map((option) => {
+                const selected = selectedPurpose === option.id
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => setSelectedPurpose(option.id)}
+                    className={[
+                      'selectable',
+                      selected ? 'selectable-active' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                  >
+                    <p className="font-semibold text-ink">{option.title}</p>
+                    <p className="mt-1 text-sm text-ink-muted">{option.description}</p>
+                  </button>
+                )
+              })}
+            </div>
+          </section>
+
+          {installError && (
+            <p className="mb-4 rounded-lg bg-danger/10 px-4 py-3 text-sm text-danger">
+              {installError}
+            </p>
+          )}
+
+          <div className="flex justify-center gap-3">
+            <button
+              type="button"
+              className="btn-primary px-8"
+              onClick={handleContinue}
+              disabled={recommendMutation.isPending}
+            >
+              {recommendMutation.isPending ? 'Finding a setup…' : 'Continue'}
+            </button>
+          </div>
+        </>
+      )}
+
+      {step === 'recommend' && recommendation && (
+        <>
+          <section className="card mb-6">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <span className="badge-preferred">Recommended</span>
+              <span className="badge-mimir">Mimir</span>
+            </div>
+            <h2 className="font-display text-xl font-semibold text-ink">
+              Recommended for{' '}
+              {presetOptions.find((o) => o.id === selectedPurpose)?.title ?? 'your use case'}
+            </h2>
+            <p className="mt-2 text-sm leading-relaxed text-ink-muted">
+              {recommendation.reason}
+            </p>
+
+            <ul className="mt-4 space-y-3">
+              {recommendation.roles.map((role) => {
+                const model = recommendation.models.find((m) => m.id === role.model_id)
+                return (
+                  <li
+                    key={`${role.role}-${role.model_id}`}
+                    className="rounded-lg border border-line bg-raised/50 px-4 py-3"
+                  >
+                    <p className="label-caps">{friendlyRole(role.role)}</p>
+                    <p className="font-medium text-ink">
+                      {model?.display_name ?? role.model_id}
+                    </p>
+                    {model?.size_bytes ? (
+                      <p className="mt-1 text-xs text-ink-muted">
+                        {formatBytes(model.size_bytes)} download
+                      </p>
+                    ) : null}
+                  </li>
+                )
+              })}
+            </ul>
+
+            <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-ink-muted">
+                  Estimated storage
+                </dt>
+                <dd className="font-medium text-ink">
+                  {formatBytes(recommendation.estimated_storage_bytes)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-ink-muted">
+                  Estimated active memory
+                </dt>
+                <dd className="font-medium text-ink">
+                  {formatBytes(recommendation.estimated_vram_bytes)}
+                </dd>
+              </div>
+            </dl>
+          </section>
+
+          {installError && (
+            <p className="mb-4 rounded-lg bg-danger/10 px-4 py-3 text-sm text-danger">
+              {installError}
+            </p>
+          )}
+
+          <div className="flex flex-wrap justify-center gap-3">
+            <button
+              type="button"
+              className="btn-primary px-8"
+              onClick={() => installMutation.mutate(recommendation)}
+              disabled={installMutation.isPending}
+            >
+              Install recommended setup
+            </button>
+            <button type="button" className="btn-secondary px-6" onClick={handleSkipInstall}>
+              Skip for now
+            </button>
+            <button
+              type="button"
+              className="btn-secondary px-6"
+              onClick={() => setStep('setup')}
+            >
+              Back
+            </button>
+          </div>
+        </>
+      )}
+
+      {step === 'installing' && (
+        <div className="card py-10">
+          <div className="mx-auto flex max-w-md flex-col items-center text-center">
+            <LoadingSpinner label={phaseDetail || 'Installing…'} />
+            <div className="mt-6 h-2 w-full overflow-hidden rounded-full bg-raised">
+              <div
+                className="h-full rounded-full bg-primary transition-all duration-500"
+                style={{ width: `${overallProgress}%` }}
+              />
+            </div>
+            <p className="mt-3 text-xs text-ink-muted">{overallProgress}% complete</p>
+            <p className="mt-4 text-sm text-ink-muted">
+              Large model downloads can take several minutes. Keep this window open.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {step === 'ready' && (
+        <div className="card flex flex-col items-center py-12 text-center">
+          <h2 className="font-display text-2xl font-semibold text-ink">You are ready</h2>
+          <p className="mt-2 max-w-md text-sm text-ink-muted">
+            Your recommended setup is installed. Start chatting with your local AI.
+          </p>
+          <button type="button" className="btn-primary mt-6 px-8" onClick={handleStartChatting}>
+            Start chatting
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function uniqueById<T extends { id: string }>(items: T[]): T[] {
+  const seen = new Set<string>()
+  const out: T[] = []
+  for (const item of items) {
+    if (seen.has(item.id)) {
+      continue
+    }
+    seen.add(item.id)
+    out.push(item)
+  }
+  return out
+}
+
+function friendlyRole(role: string): string {
+  switch (role) {
+    case 'coordinator':
+      return 'Coordinator'
+    case 'worker':
+      return 'Worker'
+    case 'reviewer':
+      return 'Reviewer'
+    case 'researcher':
+      return 'Researcher'
+    case 'assistant':
+      return 'Assistant'
+    default:
+      return role
+  }
+}

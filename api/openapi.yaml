@@ -1,0 +1,420 @@
+openapi: 3.0.3
+info:
+  title: Yggdrasil Control Plane API
+  version: 0.1.0
+  description: Local AI control plane API for Yggdrasil.
+servers:
+  - url: http://127.0.0.1:7331
+paths:
+  /api/v1/health:
+    get:
+      summary: Health check
+      operationId: getHealth
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /api/v1/version:
+    get:
+      summary: Application version
+      operationId: getVersion
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VersionResponse"
+  /api/v1/hardware:
+    get:
+      summary: Local hardware inventory
+      operationId: getHardware
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HardwareInventory"
+  /api/v1/models:
+    get:
+      summary: List catalog and installed models
+      operationId: listModels
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Model"
+  /api/v1/profiles:
+    get:
+      summary: List AI profiles
+      operationId: listProfiles
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AIProfile"
+  /api/v1/nodes:
+    get:
+      summary: List local and discovered computers
+      operationId: listNodes
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Node"
+  /api/v1/settings:
+    get:
+      summary: Get settings
+      operationId: getSettings
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsView"
+    patch:
+      summary: Update settings
+      operationId: updateSettings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsView"
+  /api/v1/settings/reset:
+    post:
+      summary: Reset application to defaults
+      description: >
+        Clears chats, custom profiles, tasks, and API keys; restores settings and
+        built-in profiles. Downloaded models and runtimes are kept. The client should
+        clear local UI state and restart onboarding.
+      operationId: resetApp
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsView"
+  /api/v1/performance:
+    get:
+      summary: List generation performance samples
+      operationId: listPerformance
+      parameters:
+        - name: sort
+          in: query
+          schema:
+            type: string
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GenerationRun"
+  /api/v1/benchmarks/workloads:
+    get:
+      summary: List benchmark workload categories
+      operationId: listBenchmarkWorkloads
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BenchmarkWorkload"
+  /api/v1/benchmarks:
+    get:
+      summary: List recent benchmark jobs
+      operationId: listBenchmarks
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BenchmarkJob"
+    post:
+      summary: Start a multi-model benchmark
+      operationId: startBenchmark
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BenchmarkRequest"
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BenchmarkJob"
+  /api/v1/benchmarks/{id}:
+    get:
+      summary: Get benchmark job status and results
+      operationId: getBenchmark
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BenchmarkJob"
+  /api/v1/benchmarks/{id}/cancel:
+    post:
+      summary: Cancel a running benchmark
+      operationId: cancelBenchmark
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/conversations:
+    get:
+      summary: List conversations
+      operationId: listConversations
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Conversation"
+    post:
+      summary: Create conversation
+      operationId: createConversation
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                profile_id:
+                  type: string
+                model_id:
+                  type: string
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+  /api/v1/conversations/{id}:
+    patch:
+      summary: Update conversation
+      operationId: updateConversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                profile_id:
+                  type: string
+                model_id:
+                  type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+    delete:
+      summary: Delete conversation
+      operationId: deleteConversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+  /api/v1/events:
+    get:
+      summary: Heimdall event stream (SSE)
+      operationId: eventStream
+      responses:
+        "200":
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+  /api/v1/logs:
+    get:
+      summary: List diagnostic log files
+      operationId: listLogs
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+  /api/v1/logs/{name}:
+    get:
+      summary: Read a log file tail
+      operationId: getLog
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tail_bytes
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /api/v1/diagnostics:
+    get:
+      summary: Create a diagnostics bundle
+      operationId: exportDiagnostics
+      responses:
+        "200":
+          description: OK
+  /v1/models:
+    get:
+      summary: OpenAI-compatible model list
+      operationId: openaiListModels
+      responses:
+        "200":
+          description: OK
+  /v1/chat/completions:
+    post:
+      summary: OpenAI-compatible chat completions
+      operationId: openaiChatCompletions
+      responses:
+        "200":
+          description: OK
+        "501":
+          description: Not implemented yet
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        product:
+          type: string
+        version:
+          type: string
+    VersionResponse:
+      type: object
+      properties:
+        version:
+          type: string
+        commit:
+          type: string
+        build_date:
+          type: string
+        product:
+          type: string
+    HardwareInventory:
+      type: object
+      additionalProperties: true
+    Model:
+      type: object
+      additionalProperties: true
+    AIProfile:
+      type: object
+      additionalProperties: true
+    Node:
+      type: object
+      additionalProperties: true
+    SettingsView:
+      type: object
+      additionalProperties: true
+    GenerationRun:
+      type: object
+      additionalProperties: true
+    BenchmarkWorkload:
+      type: object
+      additionalProperties: true
+    BenchmarkRequest:
+      type: object
+      additionalProperties: true
+    BenchmarkJob:
+      type: object
+      additionalProperties: true
+    Conversation:
+      type: object
+      additionalProperties: true

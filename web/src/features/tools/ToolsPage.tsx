@@ -1,0 +1,158 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMemo, useState } from 'react'
+import { api } from '@/lib/api'
+import type { ToolRecord } from '@/types/api'
+
+const FILTERS = ['All', 'Built-in', 'Disabled'] as const
+
+export function ToolsPage() {
+  const queryClient = useQueryClient()
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState<(typeof FILTERS)[number]>('All')
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [testArgs, setTestArgs] = useState('{"query":"Juneau AK weather"}')
+  const [testOutput, setTestOutput] = useState('')
+
+  const toolsQuery = useQuery({
+    queryKey: ['tools'],
+    queryFn: () => api.listTools(),
+  })
+  const tools = toolsQuery.data ?? []
+  const selected = tools.find((tool) => tool.id === selectedId) ?? null
+
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    return tools.filter((tool) => {
+      if (filter === 'Built-in' && tool.source !== 'builtin') return false
+      if (filter === 'Disabled' && tool.enabled) return false
+      if (!needle) return true
+      return [tool.name, tool.description, tool.capability, tool.source, tool.id]
+        .join(' ')
+        .toLowerCase()
+        .includes(needle)
+    })
+  }, [tools, query, filter])
+
+  const toggle = useMutation({
+    mutationFn: (tool: ToolRecord) => api.setToolEnabled(tool.id, !tool.enabled),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tools'] }),
+  })
+
+  const test = useMutation({
+    mutationFn: () => {
+      const args = JSON.parse(testArgs) as Record<string, unknown>
+      return api.testTool(selected?.id || '', args)
+    },
+    onSuccess: (result) => setTestOutput(JSON.stringify(result, null, 2)),
+    onError: (error) => setTestOutput(error instanceof Error ? error.message : 'Test failed'),
+  })
+
+  return (
+    <div className="page-fill gap-4 overflow-y-auto p-4">
+      <div>
+        <h1 className="font-display text-2xl font-semibold text-ink">Tools</h1>
+        <p className="mt-1 max-w-2xl text-sm text-ink-muted">
+          Built-in tools are grouped into capabilities on each profile. Disable a tool here to keep it out of every chat.
+          MCP servers can register tools in this list later.
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          className="field min-w-[16rem] flex-1"
+          value={query}
+          placeholder="Search tools…"
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        {FILTERS.map((item) => (
+          <button
+            key={item}
+            type="button"
+            className={filter === item ? 'btn-primary px-3 py-1.5 text-xs' : 'btn-secondary px-3 py-1.5 text-xs'}
+            onClick={() => setFilter(item)}
+          >
+            {item}
+          </button>
+        ))}
+      </div>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)]">
+        <ul className="space-y-2">
+          {toolsQuery.isLoading && <li className="text-sm text-ink-muted">Loading tools…</li>}
+          {visible.map((tool) => (
+            <li key={tool.id}>
+              <button
+                type="button"
+                className="card w-full text-left"
+                onClick={() => {
+                  setSelectedId(tool.id)
+                  setTestOutput('')
+                }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium text-ink">{tool.name}</p>
+                    <p className="mt-1 text-xs text-ink-muted">{tool.description}</p>
+                  </div>
+                  <span className={tool.enabled ? 'text-xs text-success' : 'text-xs text-ink-faint'}>
+                    {tool.enabled ? 'Enabled' : 'Disabled'}
+                  </span>
+                </div>
+                <p className="mt-2 text-xs text-ink-faint">
+                  {tool.capability} · {tool.source}
+                </p>
+              </button>
+            </li>
+          ))}
+        </ul>
+        {selected && (
+          <aside className="card h-fit space-y-3">
+            <h2 className="font-display text-lg font-semibold text-ink">{selected.name}</h2>
+            <p className="text-sm text-ink-muted">{selected.description}</p>
+            <dl className="space-y-1 text-xs text-ink-muted">
+              <Row label="Source" value={selected.source} />
+              <Row label="Capability" value={selected.capability} />
+              <Row label="Permission default" value={selected.default_policy} />
+              <Row label="Risk" value={selected.risk} />
+              <Row label="Profiles" value={selected.profiles.join(', ') || 'None'} />
+            </dl>
+            <pre className="log-panel text-xs">{selected.schema}</pre>
+            <button
+              type="button"
+              className="btn-secondary px-3 py-1.5 text-xs"
+              disabled={toggle.isPending}
+              onClick={() => toggle.mutate(selected)}
+            >
+              {selected.enabled ? 'Disable' : 'Enable'}
+            </button>
+            {selected.risk === 'read' && (
+              <div className="space-y-2">
+                <textarea
+                  className="field min-h-20 w-full font-mono text-xs"
+                  value={testArgs}
+                  onChange={(event) => setTestArgs(event.target.value)}
+                />
+                <button
+                  type="button"
+                  className="btn-primary px-3 py-1.5 text-xs"
+                  disabled={test.isPending}
+                  onClick={() => test.mutate()}
+                >
+                  Test tool
+                </button>
+                {testOutput && <pre className="log-panel max-h-64 text-xs">{testOutput}</pre>}
+              </div>
+            )}
+          </aside>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-3">
+      <dt>{label}</dt>
+      <dd className="text-right text-ink">{value}</dd>
+    </div>
+  )
+}

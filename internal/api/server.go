@@ -1,0 +1,731 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io/fs"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"time"
+
+	"github.com/gorilla/mux"
+	"github.com/yeixio/yggdrasil-core/internal/api/openai"
+	"github.com/yeixio/yggdrasil-core/internal/auth"
+	"github.com/yeixio/yggdrasil-core/internal/config"
+	"github.com/yeixio/yggdrasil-core/internal/events"
+	"github.com/yeixio/yggdrasil-core/internal/logs"
+	"github.com/yeixio/yggdrasil-core/internal/runtimes"
+	"github.com/yeixio/yggdrasil-core/pkg/contracts"
+)
+
+// Dependencies wires handlers to application services.
+type Dependencies struct {
+	Config   *config.Manager
+	Bus      *events.Bus
+	Logger   *slog.Logger
+	OpenAI   *openai.Handler
+	Hardware func(ctx context.Context) (contracts.HardwareInventory, error)
+
+	ListModels             func(ctx context.Context) ([]contracts.Model, error)
+	RecommendModels        func(ctx context.Context, purpose string) (contracts.Recommendation, error)
+	ModelsFit              func(ctx context.Context) ([]contracts.ModelsFitResponse, error)
+	BrowseModels           func(ctx context.Context, query string, limit int) ([]contracts.BrowseModel, error)
+	InstallModel           func(ctx context.Context, id string, wait bool, nodeID string) error
+	InstallModelFromURL    func(ctx context.Context, req contracts.InstallFromURLRequest, wait bool) (string, error)
+	DeleteModel            func(ctx context.Context, id string, nodeID string) error
+	ListRunningModels      func(ctx context.Context) ([]contracts.RunningModelView, error)
+	StartModel             func(ctx context.Context, id string, nodeID string) (contracts.RunningModelView, error)
+	StopModel              func(ctx context.Context, instanceID string, nodeID string) error
+	ListRuntimes           func(ctx context.Context) ([]runtimes.RuntimeInfo, error)
+	InstallRuntime         func(ctx context.Context, id string) error
+	ListProfiles           func(ctx context.Context) ([]contracts.AIProfile, error)
+	CreateProfile          func(ctx context.Context, p contracts.AIProfile) (contracts.AIProfile, error)
+	GetProfile             func(ctx context.Context, id string) (contracts.AIProfile, error)
+	UpdateProfile          func(ctx context.Context, p contracts.AIProfile) (contracts.AIProfile, error)
+	DeleteProfile          func(ctx context.Context, id string) error
+	ListNodes              func(ctx context.Context) ([]contracts.Node, error)
+	RefreshDiscovery       func(ctx context.Context) error
+	StartPairing           func(nodeID string) (*auth.PairingSession, error)
+	ClaimPairing           func(ctx context.Context, nodeID, code string) (*auth.PairingSession, error)
+	ApprovePairing         func(ctx context.Context, sessionID, code string) (*auth.PairingSession, error)
+	ListPairingOffers      func() []auth.PairingSession
+	ReceivePairingOffer    func(offer auth.PairingOffer) (*auth.PairingSession, error)
+	LookupOutboundPairing  func(code string) (*auth.PairingSession, bool)
+	AdvertiseAddr          func() string
+	LocalCertPEM           func() string
+	RevokeNode             func(ctx context.Context, nodeID string) error
+	ListConversations      func(ctx context.Context) ([]contracts.Conversation, error)
+	CreateConversation     func(ctx context.Context, title, profileID, modelID string) (contracts.Conversation, error)
+	UpdateConversation     func(ctx context.Context, id string, title, profileID, modelID *string) (contracts.Conversation, error)
+	DeleteConversation     func(ctx context.Context, id string) error
+	ListMessages           func(ctx context.Context, conversationID string) ([]contracts.Message, error)
+	Chat                   func(w http.ResponseWriter, r *http.Request, conversationID, profileID, modelID, message string, stream bool, execution string) error
+	ListTasks              func(ctx context.Context) ([]contracts.Task, error)
+	CreateTask             func(ctx context.Context, profileID, conversationID, prompt string) (contracts.Task, error)
+	GetTask                func(ctx context.Context, id string) (contracts.Task, error)
+	RunTask                func(ctx context.Context, id string) error
+	DecideTool             func(requestID string, allow, allowSession bool) error
+	ListTools              func(ctx context.Context) (any, error)
+	SetToolEnabled         func(ctx context.Context, id string, enabled bool) error
+	TestTool               func(ctx context.Context, id string, args map[string]any) (map[string]any, error)
+	ToolActivity           func() any
+	ListAPIKeys            func(ctx context.Context) ([]auth.APIKeyRecord, error)
+	CreateAPIKey           func(ctx context.Context, name string) (auth.APIKeyRecord, string, error)
+	RevokeAPIKey           func(ctx context.Context, id string) error
+	RotateAPIKey           func(ctx context.Context, id string) (auth.APIKeyRecord, string, error)
+	GetSettings            func(ctx context.Context) (contracts.SettingsView, error)
+	UpdateSettings         func(ctx context.Context, patch map[string]any) (contracts.SettingsView, error)
+	ResetApp               func(ctx context.Context, deleteModels bool) (contracts.SettingsView, error)
+	ListPerformance        func(ctx context.Context, sort, order string, limit int) ([]contracts.GenerationRun, error)
+	ListBenchmarkWorkloads func() []contracts.BenchmarkWorkload
+	StartBenchmark         func(ctx context.Context, req contracts.BenchmarkRequest) (*contracts.BenchmarkJob, error)
+	GetBenchmark           func(ctx context.Context, id string) (*contracts.BenchmarkJob, error)
+	ListBenchmarks         func(ctx context.Context) ([]contracts.BenchmarkJob, error)
+	CancelBenchmark        func(ctx context.Context, id string) error
+	// ExportDiagnostics writes a zip bundle and returns its absolute path.
+	ExportDiagnostics func(ctx context.Context, includeConversations bool) (string, error)
+	ListLogs          func(ctx context.Context) ([]logs.Entry, error)
+	GetLog            func(ctx context.Context, name string, tailBytes int64) (logs.Content, error)
+	Version           func() contracts.VersionResponse
+	WebRoot           fs.FS
+}
+
+// Server is the control-plane HTTP server.
+type Server struct {
+	deps   Dependencies
+	router *mux.Router
+	http   *http.Server
+}
+
+// NewServer builds the API server.
+func NewServer(deps Dependencies) *Server {
+	if deps.Logger == nil {
+		deps.Logger = slog.Default()
+	}
+	s := &Server{deps: deps, router: mux.NewRouter()}
+	s.routes()
+	return s
+}
+
+func (s *Server) routes() {
+	s.router.Use(s.recoverMiddleware)
+	s.router.Use(s.corsMiddleware)
+	s.router.Use(s.logMiddleware)
+
+	api := s.router.PathPrefix("/api/v1").Subrouter()
+	api.HandleFunc("/health", s.handleHealth).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/version", s.handleVersion).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/hardware", s.handleHardware).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/models", s.handleModels).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/models/recommend", s.handleRecommendModels).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/models/fit", s.handleModelsFit).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/models/browse", s.handleBrowseModels).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/models/running", s.handleListRunningModels).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/models/install-from-url", s.handleInstallFromURL).Methods(http.MethodPost)
+	api.HandleFunc("/models/{id}/install", s.handleInstallModel).Methods(http.MethodPost)
+	api.HandleFunc("/models/{id}/start", s.handleStartModel).Methods(http.MethodPost)
+	api.HandleFunc("/models/{id}/stop", s.handleStopModel).Methods(http.MethodPost)
+	api.HandleFunc("/models/{id}", s.handleDeleteModel).Methods(http.MethodDelete)
+	api.HandleFunc("/runtimes", s.handleListRuntimes).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/runtimes/{id}/install", s.handleInstallRuntime).Methods(http.MethodPost)
+	api.HandleFunc("/profiles", s.handleProfiles).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/profiles", s.handleCreateProfile).Methods(http.MethodPost)
+	api.HandleFunc("/profiles/{id}", s.handleGetProfile).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/profiles/{id}", s.handlePatchProfile).Methods(http.MethodPatch)
+	api.HandleFunc("/profiles/{id}", s.handleDeleteProfile).Methods(http.MethodDelete)
+	api.HandleFunc("/chat", s.handleChat).Methods(http.MethodPost)
+	api.HandleFunc("/conversations/{id}/messages", s.handleConversationMessages).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/tasks", s.handleListTasks).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/tasks", s.handleCreateTask).Methods(http.MethodPost)
+	api.HandleFunc("/tasks/{id}", s.handleGetTask).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/tools", s.handleListTools).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/tools/activity", s.handleToolActivity).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/tools/decide", s.handleToolDecide).Methods(http.MethodPost)
+	api.HandleFunc("/tools/{id}/enabled", s.handleSetToolEnabled).Methods(http.MethodPost, http.MethodOptions)
+	api.HandleFunc("/tools/{id}/test", s.handleTestTool).Methods(http.MethodPost, http.MethodOptions)
+	api.HandleFunc("/nodes", s.handleNodes).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/nodes/refresh", s.handleRefreshNodes).Methods(http.MethodPost)
+	api.HandleFunc("/nodes/pair", s.handlePairNode).Methods(http.MethodPost)
+	api.HandleFunc("/nodes/pair/claim", s.handleClaimPairing).Methods(http.MethodPost)
+	api.HandleFunc("/nodes/pairing/pending", s.handlePendingPairing).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/nodes/pairing/offer", s.handleReceivePairingOffer).Methods(http.MethodPost)
+	api.HandleFunc("/nodes/pairing/outbound/{code}", s.handleOutboundPairing).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/nodes/{id}/revoke", s.handleRevokeNode).Methods(http.MethodPost)
+	api.HandleFunc("/nodes/{id}/pair/approve", s.handleApprovePairing).Methods(http.MethodPost)
+	api.HandleFunc("/api-keys", s.handleListAPIKeys).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/api-keys", s.handleCreateAPIKey).Methods(http.MethodPost)
+	api.HandleFunc("/api-keys/{id}", s.handleDeleteAPIKey).Methods(http.MethodDelete)
+	api.HandleFunc("/api-keys/{id}/rotate", s.handleRotateAPIKey).Methods(http.MethodPost)
+	api.HandleFunc("/settings", s.handleGetSettings).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/settings", s.handlePatchSettings).Methods(http.MethodPatch, http.MethodPut)
+	api.HandleFunc("/settings/reset", s.handleResetApp).Methods(http.MethodPost, http.MethodOptions)
+	api.HandleFunc("/performance", s.handleListPerformance).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/benchmarks/workloads", s.handleListBenchmarkWorkloads).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/benchmarks", s.handleListBenchmarks).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/benchmarks", s.handleStartBenchmark).Methods(http.MethodPost)
+	api.HandleFunc("/benchmarks/{id}", s.handleGetBenchmark).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/benchmarks/{id}/cancel", s.handleCancelBenchmark).Methods(http.MethodPost)
+	api.HandleFunc("/diagnostics", s.handleDiagnostics).Methods(http.MethodGet, http.MethodPost, http.MethodOptions)
+	api.HandleFunc("/logs", s.handleListLogs).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/logs/{name}", s.handleGetLog).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/conversations", s.handleListConversations).Methods(http.MethodGet, http.MethodOptions)
+	api.HandleFunc("/conversations", s.handleCreateConversation).Methods(http.MethodPost)
+	api.HandleFunc("/conversations/{id}", s.handleUpdateConversation).Methods(http.MethodPatch)
+	api.HandleFunc("/conversations/{id}", s.handleDeleteConversation).Methods(http.MethodDelete)
+	api.HandleFunc("/events", s.handleSSE).Methods(http.MethodGet, http.MethodOptions)
+
+	if s.deps.OpenAI != nil {
+		s.router.HandleFunc("/v1/models", s.deps.OpenAI.HandleModels).Methods(http.MethodGet, http.MethodOptions)
+		s.router.HandleFunc("/v1/chat/completions", s.deps.OpenAI.HandleChatCompletions).Methods(http.MethodPost, http.MethodOptions)
+	} else {
+		s.router.HandleFunc("/v1/models", s.handleOpenAIModels).Methods(http.MethodGet, http.MethodOptions)
+		s.router.HandleFunc("/v1/chat/completions", s.handleOpenAIChat).Methods(http.MethodPost, http.MethodOptions)
+	}
+
+	if s.deps.WebRoot != nil {
+		fileServer := http.FileServer(http.FS(s.deps.WebRoot))
+		s.router.PathPrefix("/").Handler(spaFallback(s.deps.WebRoot, fileServer))
+	}
+}
+
+// Handler returns the root HTTP handler.
+func (s *Server) Handler() http.Handler {
+	return s.router
+}
+
+// ListenAndServe starts the server on addr.
+func (s *Server) ListenAndServe(addr string) error {
+	s.http = &http.Server{
+		Addr:              addr,
+		Handler:           s.router,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	s.deps.Logger.Info("api listening", "addr", ln.Addr().String())
+	return s.http.Serve(ln)
+}
+
+// Shutdown gracefully stops the server.
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s.http == nil {
+		return nil
+	}
+	return s.http.Shutdown(ctx)
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	ver := "0.1.0-dev"
+	if s.deps.Version != nil {
+		ver = s.deps.Version().Version
+	}
+	writeJSON(w, http.StatusOK, contracts.HealthResponse{
+		Status:  "ok",
+		Product: "Yggdrasil",
+		Version: ver,
+	})
+}
+
+func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Version != nil {
+		writeJSON(w, http.StatusOK, s.deps.Version())
+		return
+	}
+	writeJSON(w, http.StatusOK, contracts.VersionResponse{
+		Version: "0.1.0-dev",
+		Product: "Yggdrasil",
+	})
+}
+
+func (s *Server) handleHardware(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Hardware == nil {
+		writeErr(w, http.StatusServiceUnavailable, "HARDWARE_UNAVAILABLE", "Hardware detection is not available.", nil)
+		return
+	}
+	inv, err := s.deps.Hardware(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "HARDWARE_DETECT_FAILED",
+			"Could not fully detect hardware. Some details may be missing.",
+			map[string]any{"cause": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, inv)
+}
+
+func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
+	if s.deps.ListModels == nil {
+		writeJSON(w, http.StatusOK, []contracts.Model{})
+		return
+	}
+	models, err := s.deps.ListModels(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "MODELS_LIST_FAILED", "Could not list models.", map[string]any{"cause": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, models)
+}
+
+func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
+	if s.deps.ListProfiles == nil {
+		writeJSON(w, http.StatusOK, []contracts.AIProfile{})
+		return
+	}
+	items, err := s.deps.ListProfiles(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "PROFILES_LIST_FAILED", "Could not list profiles.", map[string]any{"cause": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
+	if s.deps.ListNodes == nil {
+		writeJSON(w, http.StatusOK, []contracts.Node{})
+		return
+	}
+	items, err := s.deps.ListNodes(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "NODES_LIST_FAILED", "Could not list computers.", map[string]any{"cause": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (s *Server) handleRefreshNodes(w http.ResponseWriter, r *http.Request) {
+	if s.deps.RefreshDiscovery == nil {
+		writeErr(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "Discovery refresh not available.", nil)
+		return
+	}
+	if err := s.deps.RefreshDiscovery(r.Context()); err != nil {
+		writeErr(w, http.StatusBadRequest, "REFRESH_FAILED", err.Error(), nil)
+		return
+	}
+	if s.deps.ListNodes == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+	items, err := s.deps.ListNodes(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "NODES_LIST_FAILED", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
+	if s.deps.GetSettings != nil {
+		view, err := s.deps.GetSettings(r.Context())
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "SETTINGS_READ_FAILED", "Could not read settings.", map[string]any{"cause": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, view)
+		return
+	}
+	cfg := s.deps.Config.Get()
+	writeJSON(w, http.StatusOK, contracts.SettingsView{
+		DataDir:          cfg.DataDir,
+		ModelsDir:        cfg.ModelsDir,
+		RuntimesDir:      cfg.RuntimesDir,
+		LogsDir:          cfg.LogsDir,
+		APIHost:          cfg.APIHost,
+		APIPort:          cfg.APIPort,
+		LANAPIEnabled:    cfg.LANAPIEnabled,
+		WebUIEnabled:     cfg.WebUIEnabled,
+		DiscoveryEnabled: cfg.DiscoveryEnabled,
+		NodeName:         cfg.NodeName,
+		NodeID:           cfg.NodeID,
+	})
+}
+
+func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
+	var patch map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+		writeErr(w, http.StatusBadRequest, "INVALID_JSON", "Request body must be JSON.", nil)
+		return
+	}
+	if s.deps.UpdateSettings != nil {
+		view, err := s.deps.UpdateSettings(r.Context(), patch)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "SETTINGS_UPDATE_FAILED", "Could not update settings.", map[string]any{"cause": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, view)
+		return
+	}
+	err := s.deps.Config.Update(func(c *config.Config) {
+		if v, ok := patch["node_name"].(string); ok && v != "" {
+			c.NodeName = v
+		}
+		if v, ok := patch["lan_api_enabled"].(bool); ok {
+			c.LANAPIEnabled = v
+			if v {
+				c.APIHost = "0.0.0.0"
+			} else {
+				c.APIHost = config.DefaultBindLoopback
+			}
+		}
+		if v, ok := patch["discovery_enabled"].(bool); ok {
+			c.DiscoveryEnabled = v
+		}
+		if v, ok := patch["web_ui_enabled"].(bool); ok {
+			c.WebUIEnabled = v
+		}
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "SETTINGS_UPDATE_FAILED", "Could not update settings.", map[string]any{"cause": err.Error()})
+		return
+	}
+	s.handleGetSettings(w, r)
+}
+
+func (s *Server) handleResetApp(w http.ResponseWriter, r *http.Request) {
+	if s.deps.ResetApp == nil {
+		writeErr(w, http.StatusNotImplemented, "RESET_UNSUPPORTED", "Application reset is not available.", nil)
+		return
+	}
+	deleteModels := r.URL.Query().Get("delete_models") == "true"
+	if r.Body != nil && r.ContentLength != 0 {
+		var body struct {
+			DeleteModels bool `json:"delete_models"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+			deleteModels = body.DeleteModels
+		}
+	}
+	view, err := s.deps.ResetApp(r.Context(), deleteModels)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "RESET_FAILED", "Could not reset the application.", map[string]any{"cause": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (s *Server) handleListPerformance(w http.ResponseWriter, r *http.Request) {
+	if s.deps.ListPerformance == nil {
+		writeJSON(w, http.StatusOK, []contracts.GenerationRun{})
+		return
+	}
+	q := r.URL.Query()
+	limit := 200
+	if v := q.Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	items, err := s.deps.ListPerformance(r.Context(), q.Get("sort"), q.Get("order"), limit)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "PERFORMANCE_LIST_FAILED", "Could not list performance metrics.", map[string]any{"cause": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (s *Server) handleListBenchmarkWorkloads(w http.ResponseWriter, r *http.Request) {
+	if s.deps.ListBenchmarkWorkloads == nil {
+		writeJSON(w, http.StatusOK, []contracts.BenchmarkWorkload{})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.deps.ListBenchmarkWorkloads())
+}
+
+func (s *Server) handleListBenchmarks(w http.ResponseWriter, r *http.Request) {
+	if s.deps.ListBenchmarks == nil {
+		writeJSON(w, http.StatusOK, []contracts.BenchmarkJob{})
+		return
+	}
+	items, err := s.deps.ListBenchmarks(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "BENCHMARK_LIST_FAILED", "Could not list benchmarks.", map[string]any{"cause": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (s *Server) handleStartBenchmark(w http.ResponseWriter, r *http.Request) {
+	if s.deps.StartBenchmark == nil {
+		writeErr(w, http.StatusNotImplemented, "BENCHMARK_UNSUPPORTED", "Benchmarks are not available.", nil)
+		return
+	}
+	var req contracts.BenchmarkRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "INVALID_JSON", "Request body must be JSON.", nil)
+		return
+	}
+	job, err := s.deps.StartBenchmark(r.Context(), req)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "BENCHMARK_START_FAILED", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+func (s *Server) handleGetBenchmark(w http.ResponseWriter, r *http.Request) {
+	if s.deps.GetBenchmark == nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "Benchmark not found.", nil)
+		return
+	}
+	id := mux.Vars(r)["id"]
+	job, err := s.deps.GetBenchmark(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "Benchmark not found.", map[string]any{"cause": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, job)
+}
+
+func (s *Server) handleCancelBenchmark(w http.ResponseWriter, r *http.Request) {
+	if s.deps.CancelBenchmark == nil {
+		writeErr(w, http.StatusNotImplemented, "BENCHMARK_UNSUPPORTED", "Benchmarks are not available.", nil)
+		return
+	}
+	id := mux.Vars(r)["id"]
+	if err := s.deps.CancelBenchmark(r.Context(), id); err != nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "Benchmark not found.", map[string]any{"cause": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request) {
+	if s.deps.ListConversations == nil {
+		writeJSON(w, http.StatusOK, []contracts.Conversation{})
+		return
+	}
+	items, err := s.deps.ListConversations(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "CONVERSATIONS_LIST_FAILED", "Could not list conversations.", map[string]any{"cause": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (s *Server) handleCreateConversation(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Title     string `json:"title"`
+		ProfileID string `json:"profile_id"`
+		ModelID   string `json:"model_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "INVALID_JSON", "Request body must be JSON.", nil)
+		return
+	}
+	if s.deps.CreateConversation == nil {
+		writeErr(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "Conversations are not available yet.", nil)
+		return
+	}
+	conv, err := s.deps.CreateConversation(r.Context(), body.Title, body.ProfileID, body.ModelID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "CONVERSATION_CREATE_FAILED", "Could not create conversation.", map[string]any{"cause": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusCreated, conv)
+}
+
+func (s *Server) handleUpdateConversation(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	var body struct {
+		Title     *string `json:"title"`
+		ProfileID *string `json:"profile_id"`
+		ModelID   *string `json:"model_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "INVALID_JSON", "Request body must be JSON.", nil)
+		return
+	}
+	if s.deps.UpdateConversation == nil {
+		writeErr(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "Conversations are not available yet.", nil)
+		return
+	}
+	conv, err := s.deps.UpdateConversation(r.Context(), id, body.Title, body.ProfileID, body.ModelID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "CONVERSATION_UPDATE_FAILED", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, conv)
+}
+
+func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	if s.deps.DeleteConversation == nil {
+		writeErr(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "Conversations are not available yet.", nil)
+		return
+	}
+	if err := s.deps.DeleteConversation(r.Context(), id); err != nil {
+		writeErr(w, http.StatusBadRequest, "CONVERSATION_DELETE_FAILED", err.Error(), nil)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeErr(w, http.StatusInternalServerError, "SSE_UNSUPPORTED", "Streaming is not supported.", nil)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	id, ch := s.deps.Bus.Subscribe()
+	defer s.deps.Bus.Unsubscribe(id)
+
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case evt, ok := <-ch:
+			if !ok {
+				return
+			}
+			data, _ := json.Marshal(evt)
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, data)
+			flusher.Flush()
+		case <-ticker.C:
+			fmt.Fprintf(w, ": ping\n\n")
+			flusher.Flush()
+		}
+	}
+}
+
+func (s *Server) handleOpenAIModels(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"object": "list",
+		"data":   []any{},
+	})
+}
+
+func (s *Server) handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
+	writeErr(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "Chat completions will be available after local models are installed.", nil)
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeErr(w http.ResponseWriter, status int, code, message string, details map[string]any) {
+	writeJSON(w, status, contracts.APIError{
+		Error: contracts.ErrorBody{Code: code, Message: message, Details: details},
+	})
+}
+
+func (s *Server) corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Access-Control-Request-Private-Network")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		// Chrome / WebKit Private Network Access: Wails webview → 127.0.0.1 API.
+		w.Header().Set("Access-Control-Allow-Private-Network", "true")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) recoverMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				s.deps.Logger.Error("api panic", "path", r.URL.Path, "recover", fmt.Sprint(rec))
+				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal server error.", nil)
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) logMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		next.ServeHTTP(w, r)
+		s.deps.Logger.Debug("http", "method", r.Method, "path", r.URL.Path, "dur", time.Since(start))
+	})
+}
+
+func spaFallback(root fs.FS, files http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if path == "/" {
+			files.ServeHTTP(w, r)
+			return
+		}
+		cleaned := filepath.Clean(stringsTrimPrefix(path))
+		if cleaned == "." {
+			cleaned = "index.html"
+		}
+		if _, err := fs.Stat(root, cleaned); err == nil {
+			files.ServeHTTP(w, r)
+			return
+		}
+		// SPA fallback
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = "/"
+		files.ServeHTTP(w, r2)
+	})
+}
+
+func stringsTrimPrefix(p string) string {
+	if len(p) > 0 && p[0] == '/' {
+		return p[1:]
+	}
+	return p
+}
+
+// ResolveWebRoot returns an fs.FS for the built web UI if present.
+func ResolveWebRoot(explicit string) (fs.FS, error) {
+	candidates := []string{explicit}
+	if exe, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exe)
+		candidates = append(candidates,
+			filepath.Join(dir, "web"),
+			filepath.Join(dir, "web", "dist"),
+			filepath.Join(dir, "..", "Resources", "web"),
+			filepath.Join(dir, "..", "share", "yggdrasil", "web"),
+		)
+	}
+	if wd, err := os.Getwd(); err == nil {
+		candidates = append(candidates,
+			filepath.Join(wd, "web"),
+			filepath.Join(wd, "web", "dist"),
+			filepath.Join(wd, "..", "web", "dist"),
+		)
+	}
+	for _, c := range candidates {
+		if c == "" {
+			continue
+		}
+		if st, err := os.Stat(c); err == nil && st.IsDir() {
+			// Prefer a directory that looks like a Vite build (has index.html).
+			if _, err := os.Stat(filepath.Join(c, "index.html")); err == nil {
+				return os.DirFS(c), nil
+			}
+		}
+	}
+	// Fall back to any existing candidate directory (tests / partial layouts).
+	for _, c := range candidates {
+		if c == "" {
+			continue
+		}
+		if st, err := os.Stat(c); err == nil && st.IsDir() {
+			return os.DirFS(c), nil
+		}
+	}
+	return nil, nil
+}

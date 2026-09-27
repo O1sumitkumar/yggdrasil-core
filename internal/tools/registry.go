@@ -1,0 +1,304 @@
+package tools
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"sync"
+
+	"github.com/google/uuid"
+	"github.com/yeixio/yggdrasil-core/internal/events"
+	"time"
+
+	"github.com/yeixio/yggdrasil-core/internal/tools/filesystem"
+	"github.com/yeixio/yggdrasil-core/internal/tools/git"
+	"github.com/yeixio/yggdrasil-core/internal/tools/internet"
+	"github.com/yeixio/yggdrasil-core/internal/tools/terminal"
+)
+
+// PendingCall awaits user decision.
+type PendingCall struct {
+	ID       string
+	ToolID   string
+	Args     map[string]any
+	Reason   string
+	Response chan Decision
+}
+
+// Decision is the user's tool permission choice.
+type Decision struct {
+	Allow        bool
+	AllowSession bool
+}
+
+// Registry manages tools and pending permission prompts.
+type Registry struct {
+	tools    map[string]Tool
+	policy   *PolicyEngine
+	bus      *events.Bus
+	pending  map[string]*PendingCall
+	disabled map[string]struct{}
+	activity []Activity
+	mu       sync.Mutex
+}
+
+// Activity is a short diagnostics record. It does not include file contents.
+type Activity struct {
+	ToolID     string    `json:"tool_id"`
+	Status     string    `json:"status"`
+	Summary    string    `json:"summary,omitempty"`
+	DurationMS int64     `json:"duration_ms,omitempty"`
+	Error      string    `json:"error,omitempty"`
+	At         time.Time `json:"at"`
+}
+
+// NewRegistry registers built-in tools.
+func NewRegistry(workspace string, bus *events.Bus) *Registry {
+	r := &Registry{
+		tools:    make(map[string]Tool),
+		policy:   NewPolicyEngine(),
+		bus:      bus,
+		pending:  make(map[string]*PendingCall),
+		disabled: map[string]struct{}{},
+	}
+	for _, t := range []Tool{
+		internet.NewSearch(nil),
+		internet.NewOpen(nil),
+		filesystem.NewSearch(workspace),
+		filesystem.NewRead(workspace),
+		filesystem.NewWrite(workspace),
+		terminal.New(),
+		git.NewStatus(workspace),
+		git.NewDiff(workspace),
+		git.NewLog(workspace),
+		git.NewShow(workspace),
+		git.NewAdd(workspace),
+		git.NewCommit(workspace),
+		git.NewPush(workspace),
+	} {
+		r.tools[t.ID()] = t
+	}
+	return r
+}
+
+func (r *Registry) List() []Tool {
+	out := make([]Tool, 0, len(r.tools))
+	for _, t := range r.tools {
+		out = append(out, t)
+	}
+	return out
+}
+
+func (r *Registry) Get(id string) (Tool, error) {
+	t, ok := r.tools[id]
+	if !ok {
+		return nil, fmt.Errorf("tool %q not found", id)
+	}
+	return t, nil
+}
+
+// Execute runs a tool respecting policy; may block on pending approval.
+// meta is merged into tool.* event payloads (e.g. conversation_id, task_id).
+func (r *Registry) Execute(ctx context.Context, toolID string, args map[string]any, policy string, reason string, meta map[string]any) (map[string]any, error) {
+	t, err := r.Get(toolID)
+	if err != nil {
+		return nil, err
+	}
+	if r.IsDisabled(toolID) {
+		err := fmt.Errorf("tool %q is disabled", toolID)
+		r.record(Activity{ToolID: toolID, Status: "disabled", Error: err.Error(), At: time.Now()})
+		return nil, err
+	}
+	if err := implausibleCall(toolID, args); err != nil {
+		r.record(Activity{ToolID: toolID, Status: "malformed", Summary: activitySummary(args), Error: err.Error(), At: time.Now()})
+		r.bus.Publish(events.New(events.ToolFailed, mergeMeta(meta, map[string]any{
+			"tool_id": toolID, "error": err.Error(), "malformed": true,
+		})))
+		return nil, err
+	}
+	allowed, needsPrompt, err := r.policy.Decide(toolID, policy)
+	if err != nil {
+		return nil, err
+	}
+	if needsPrompt {
+		decision, err := r.requestApproval(ctx, toolID, args, reason, meta)
+		if err != nil {
+			return nil, err
+		}
+		if !decision.Allow {
+			return nil, fmt.Errorf("tool %q denied by user", toolID)
+		}
+		if decision.AllowSession {
+			r.policy.AllowSession(toolID)
+		}
+	} else if !allowed {
+		return nil, fmt.Errorf("tool %q not allowed", toolID)
+	}
+
+	summary := activitySummary(args)
+	started := time.Now()
+	r.record(Activity{ToolID: toolID, Status: "started", Summary: summary, At: started})
+	r.bus.Publish(events.New(events.ToolStarted, mergeMeta(meta, map[string]any{"tool_id": toolID, "summary": summary})))
+	result, err := t.Execute(ctx, args)
+	elapsed := time.Since(started).Milliseconds()
+	if err != nil {
+		r.record(Activity{ToolID: toolID, Status: "failed", Summary: summary, DurationMS: elapsed, Error: err.Error(), At: time.Now()})
+		r.bus.Publish(events.New(events.ToolFailed, mergeMeta(meta, map[string]any{
+			"tool_id": toolID, "error": err.Error(), "duration_ms": elapsed, "summary": summary,
+		})))
+		return nil, err
+	}
+	r.record(Activity{ToolID: toolID, Status: "completed", Summary: summary, DurationMS: elapsed, At: time.Now()})
+	r.bus.Publish(events.New(events.ToolCompleted, mergeMeta(meta, map[string]any{
+		"tool_id": toolID, "duration_ms": elapsed, "summary": summary,
+	})))
+	return result, nil
+}
+
+func activitySummary(args map[string]any) string {
+	for _, key := range []string{"query", "url", "path", "command"} {
+		if value, ok := args[key].(string); ok && strings.TrimSpace(value) != "" {
+			value = strings.TrimSpace(value)
+			if len(value) > 160 {
+				value = value[:160] + "…"
+			}
+			return value
+		}
+	}
+	return ""
+}
+
+func (r *Registry) IsDisabled(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, ok := r.disabled[id]
+	return ok
+}
+
+func (r *Registry) SetEnabled(id string, enabled bool) error {
+	if _, ok := Lookup(id); !ok {
+		return fmt.Errorf("tool %q not found", id)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if enabled {
+		delete(r.disabled, id)
+	} else {
+		r.disabled[id] = struct{}{}
+	}
+	return nil
+}
+
+func (r *Registry) Disabled() map[string]struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string]struct{}, len(r.disabled))
+	for id := range r.disabled {
+		out[id] = struct{}{}
+	}
+	return out
+}
+
+func (r *Registry) Recent() []Activity {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]Activity, len(r.activity))
+	copy(out, r.activity)
+	return out
+}
+
+// Note appends a diagnostics record that does not include file contents.
+func (r *Registry) Note(item Activity) {
+	if item.At.IsZero() {
+		item.At = time.Now()
+	}
+	r.record(item)
+}
+
+func (r *Registry) record(item Activity) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.activity = append(r.activity, item)
+	if len(r.activity) > 50 {
+		r.activity = r.activity[len(r.activity)-50:]
+	}
+}
+
+func (r *Registry) requestApproval(ctx context.Context, toolID string, args map[string]any, reason string, meta map[string]any) (Decision, error) {
+	id := uuid.NewString()
+	resp := make(chan Decision, 1)
+	pc := &PendingCall{ID: id, ToolID: toolID, Args: args, Reason: reason, Response: resp}
+	r.mu.Lock()
+	r.pending[id] = pc
+	r.mu.Unlock()
+	defer func() {
+		r.mu.Lock()
+		delete(r.pending, id)
+		r.mu.Unlock()
+	}()
+
+	payload := mergeMeta(meta, map[string]any{
+		"request_id": id,
+		"tool_id":    toolID,
+		"args":       sanitizeArgs(args),
+		"reason":     reason,
+	})
+	r.bus.Publish(events.New(events.ToolRequested, payload))
+
+	select {
+	case <-ctx.Done():
+		return Decision{}, ctx.Err()
+	case d := <-resp:
+		return d, nil
+	}
+}
+
+// Decide resolves a pending tool call from the API.
+func (r *Registry) Decide(requestID string, allow, allowSession bool) error {
+	r.mu.Lock()
+	pc, ok := r.pending[requestID]
+	r.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("pending request %q not found", requestID)
+	}
+	select {
+	case pc.Response <- Decision{Allow: allow, AllowSession: allowSession}:
+		return nil
+	default:
+		return fmt.Errorf("request %q already resolved", requestID)
+	}
+}
+
+func mergeMeta(meta, base map[string]any) map[string]any {
+	out := make(map[string]any, len(base)+len(meta))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range meta {
+		if _, exists := out[k]; !exists {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// sanitizeArgs truncates long string values so prompts never dump huge payloads.
+func sanitizeArgs(args map[string]any) map[string]any {
+	if args == nil {
+		return nil
+	}
+	out := make(map[string]any, len(args))
+	for k, v := range args {
+		switch s := v.(type) {
+		case string:
+			if len(s) > 500 {
+				out[k] = s[:500] + "…"
+			} else {
+				out[k] = s
+			}
+		default:
+			out[k] = v
+		}
+	}
+	return out
+}

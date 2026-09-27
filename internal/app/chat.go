@@ -1,0 +1,820 @@
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/yeixio/yggdrasil-core/internal/contextusage"
+	"github.com/yeixio/yggdrasil-core/internal/events"
+	"github.com/yeixio/yggdrasil-core/internal/models"
+	modelhealth "github.com/yeixio/yggdrasil-core/internal/models/health"
+	"github.com/yeixio/yggdrasil-core/internal/profiles"
+	"github.com/yeixio/yggdrasil-core/internal/runtimes/llamacpp"
+	"github.com/yeixio/yggdrasil-core/internal/tools"
+	"github.com/yeixio/yggdrasil-core/pkg/contracts"
+	"github.com/yeixio/yggdrasil-core/pkg/pluginapi"
+)
+
+// RunChat executes a chat turn with streaming support.
+// modelID, when set, overrides the profile's role model bindings for this turn.
+// execution is automatic | local (empty keeps the profile node policy).
+func (a *App) RunChat(ctx context.Context, profileID, conversationID, message string, stream bool, modelID, execution string) (<-chan pluginapi.ChatChunk, error) {
+	if conversationID != "" {
+		if conv, err := a.Conversations.Get(ctx, conversationID); err == nil {
+			if profileID == "" {
+				profileID = conv.ProfileID
+			}
+			if modelID == "" {
+				modelID = conv.ModelID
+			}
+		}
+	}
+	if profileID == "" {
+		profileID = a.defaultProfileID(ctx)
+	}
+	profile, err := a.Profiles.Get(ctx, profileID)
+	if err != nil {
+		// Fall back to a chat-ready default when the stored id is missing.
+		if modelID == "" {
+			return nil, err
+		}
+		profile = profiles.Profile{
+			ID:             "chat",
+			Name:           "Chat",
+			Purpose:        "general",
+			OrchestratorID: "simple",
+			NodePolicy:     contracts.NodePolicy{Mode: "automatic"},
+		}
+	}
+	// OpenAI /v1 and Chat both may hit presets with empty role model_ids.
+	// Chat usually supplies a UI pick; when none is given, fill from an installed model.
+	if modelID == "" && profileNeedsModelFill(profile) {
+		mid, pickErr := a.defaultInstalledModelID(ctx)
+		if pickErr != nil {
+			return nil, fmt.Errorf(
+				"profile %q needs model assignments (or pass a model id); %w",
+				profileID, pickErr,
+			)
+		}
+		modelID = mid
+	}
+	if modelID != "" {
+		profile = withChatModel(profile, modelID)
+	}
+	profile = applyExecutionPolicy(profile, execution)
+	if execution == "automatic" && a.Models != nil {
+		installed, listErr := a.Models.List(ctx)
+		if listErr == nil {
+			if next, reason := routeToolCapableModel(execution, message, modelID, installed); next != "" && next != modelID {
+				modelID = next
+				profile = withChatModel(profile, modelID)
+				profile = applyExecutionPolicy(profile, execution)
+				a.Bus.Publish(events.New("chat.model_routed", map[string]any{
+					"conversation_id": conversationID,
+					"model_id":        modelID,
+					"reason":          reason,
+				}))
+			}
+		}
+	}
+	if modelID != "" && a.Models != nil {
+		if entry, ok := a.Models.Catalog().Get(modelID); ok && toolCallSupport(entry.Capabilities) == "unsupported" {
+			profile = withoutTools(profile)
+		}
+	}
+	orch, err := a.OrchRegistry.Get(profile.OrchestratorID)
+	if err != nil {
+		return nil, err
+	}
+	if err := orch.ValidateProfile(ctx, profile); err != nil {
+		return nil, err
+	}
+
+	if conversationID != "" {
+		if save, _ := a.Settings.GetBool(ctx, "save_chat_history", true); save {
+			_, _ = a.Conversations.AddMessage(ctx, conversationID, "user", message)
+		}
+	}
+
+	if saveTask, _ := a.Settings.GetBool(ctx, "save_task_history", true); !saveTask {
+		// Still run orchestration; Tasks.Create is required for execution plumbing.
+	}
+	task, err := a.Tasks.Create(ctx, profileID, conversationID, message)
+	if err != nil {
+		return nil, err
+	}
+
+	convTitle := ""
+	if conversationID != "" {
+		if conv, err := a.Conversations.Get(ctx, conversationID); err == nil {
+			convTitle = conv.Title
+		}
+	}
+
+	ch := make(chan pluginapi.ChatChunk, 32)
+	go func() {
+		defer close(ch)
+		env := &chatExecEnv{
+			app:            a,
+			ctx:            ctx,
+			profile:        profile,
+			modelOverride:  modelID,
+			conversationID: conversationID,
+			taskID:         task.ID,
+			turnPrompt:     message,
+		}
+		eventsCh, err := orch.Run(ctx, task, profile, env)
+		if err != nil {
+			ch <- pluginapi.ChatChunk{Error: err.Error(), Done: true}
+			return
+		}
+		teamMode := profile.OrchestratorID == "team"
+		var full string
+		var metrics *pluginapi.GenerationMetrics
+		var roleSteps []contracts.GenerationRoleStep
+		var contextUsage map[string]any
+		for evt := range eventsCh {
+			if evt.Error != "" {
+				if _, healthFailure := modelhealth.Parse(evt.Error); healthFailure && full != "" {
+					if teamMode {
+						ch <- pluginapi.ChatChunk{Content: full}
+					}
+					if conversationID != "" {
+						if saveChat, _ := a.Settings.GetBool(ctx, "save_chat_history", true); saveChat {
+							_, _ = a.Conversations.AddMessage(ctx, conversationID, "assistant", full)
+						}
+					}
+				}
+				ch <- pluginapi.ChatChunk{Error: evt.Error, Done: true}
+				return
+			}
+			if evt.Type == "agent.completed" && evt.Role != "" {
+				// Team emits a final Done envelope after the three roles; skip that one.
+				if !(teamMode && evt.Done) {
+					step := roleStepFromEvent(a, profile, evt)
+					if step.NodeID == "" {
+						if id, ok := env.roleNode(evt.Role); ok {
+							step.NodeID = id
+							step.NodeName = a.nodeDisplayName(id)
+						}
+					}
+					if step.ModelID == "" {
+						if mid, ok := env.roleModel(evt.Role); ok {
+							step.ModelID = mid
+						}
+					}
+					replaced := false
+					for i := range roleSteps {
+						if roleSteps[i].Role == step.Role {
+							roleSteps[i] = step
+							replaced = true
+							break
+						}
+					}
+					if !replaced {
+						roleSteps = append(roleSteps, step)
+					}
+				}
+			}
+			if evt.Metrics != nil {
+				metrics = evt.Metrics
+			}
+			if copied := copyContextUsage(evt.Payload); copied != nil {
+				contextUsage = copied
+			}
+			if teamMode {
+				if evt.Type == "agent.message" && evt.Content != "" {
+					if visible := tools.VisibleText(evt.Content); visible != "" {
+						full += visible
+					}
+				}
+				// Keep intermediate role tokens off the transcript; timeline uses bus events.
+				if evt.Done {
+					if evt.Content != "" {
+						full = evt.Content
+						ch <- pluginapi.ChatChunk{Content: evt.Content}
+						a.Bus.Publish(events.New(events.ChatToken, map[string]any{
+							"conversation_id": conversationID,
+							"content":         evt.Content,
+						}))
+					}
+					if agg := aggregateRoleMetrics(roleSteps); agg != nil {
+						metrics = agg
+					}
+					ch <- pluginapi.ChatChunk{Done: true, Metrics: metrics}
+				}
+				continue
+			}
+			if evt.Content != "" && evt.Type != "agent.completed" {
+				visible := tools.VisibleText(evt.Content)
+				if visible == "" {
+					continue
+				}
+				full += visible
+				ch <- pluginapi.ChatChunk{Content: visible}
+				a.Bus.Publish(events.New(events.ChatToken, map[string]any{
+					"conversation_id": conversationID,
+					"content":         visible,
+				}))
+			}
+			if evt.Done {
+				ch <- pluginapi.ChatChunk{Done: true, Metrics: metrics}
+			}
+		}
+		if conversationID != "" && full != "" {
+			saveChat, _ := a.Settings.GetBool(ctx, "save_chat_history", true)
+			msgID := ""
+			if saveChat {
+				msg, _ := a.Conversations.AddMessage(ctx, conversationID, "assistant", full)
+				msgID = msg.ID
+			}
+			a.recordGeneration(ctx, profile, conversationID, convTitle, msgID, env.modelID(), metrics, roleSteps)
+		} else if metrics != nil || len(roleSteps) > 0 {
+			a.recordGeneration(ctx, profile, conversationID, convTitle, "", env.modelID(), metrics, roleSteps)
+		}
+		payload := map[string]any{"conversation_id": conversationID}
+		if metrics != nil {
+			payload["metrics"] = metrics
+			payload["model_id"] = env.modelID()
+		}
+		if contextUsage != nil {
+			contextUsage["limit"] = env.ContextLimit()
+			payload["context"] = contextUsage
+		}
+		if len(roleSteps) > 0 {
+			payload["role_steps"] = roleSteps
+			payload["cross_machine"] = distinctNodeCount(roleSteps) > 1
+		}
+		a.Bus.Publish(events.New(events.ChatComplete, payload))
+	}()
+	return ch, nil
+}
+
+func roleStepFromEvent(a *App, profile profiles.Profile, evt pluginapi.OrchestrationEvent) contracts.GenerationRoleStep {
+	modelID := evt.ModelID
+	if modelID == "" {
+		for _, r := range profile.Roles {
+			if r.Role == evt.Role && r.ModelID != "" {
+				modelID = r.ModelID
+				break
+			}
+		}
+	}
+	step := contracts.GenerationRoleStep{
+		Role:     evt.Role,
+		NodeID:   evt.NodeID,
+		NodeName: a.nodeDisplayName(evt.NodeID),
+		ModelID:  modelID,
+	}
+	if evt.Metrics != nil {
+		step.PromptTokens = evt.Metrics.PromptTokens
+		step.CompletionTokens = evt.Metrics.CompletionTokens
+		step.TotalTokens = evt.Metrics.TotalTokens
+		step.TTFTMs = evt.Metrics.TTFTMs
+		step.PromptMs = evt.Metrics.PromptMs
+		step.EvalMs = evt.Metrics.EvalMs
+		step.TotalMs = evt.Metrics.TotalMs
+		step.PromptTokPerSec = evt.Metrics.PromptTokPerSec
+		step.EvalTokPerSec = evt.Metrics.EvalTokPerSec
+	}
+	return step
+}
+
+func copyContextUsage(payload map[string]any) map[string]any {
+	if payload == nil {
+		return nil
+	}
+	raw, ok := payload["context"].(map[string]any)
+	if !ok || raw == nil {
+		return nil
+	}
+	out := make(map[string]any, len(raw))
+	for key, value := range raw {
+		out[key] = value
+	}
+	return out
+}
+
+func distinctNodeCount(steps []contracts.GenerationRoleStep) int {
+	seen := map[string]struct{}{}
+	for _, s := range steps {
+		if s.NodeID != "" {
+			seen[s.NodeID] = struct{}{}
+		}
+	}
+	return len(seen)
+}
+
+func aggregateRoleMetrics(steps []contracts.GenerationRoleStep) *pluginapi.GenerationMetrics {
+	if len(steps) == 0 {
+		return nil
+	}
+	var out pluginapi.GenerationMetrics
+	var evalMsSum float64
+	for i, s := range steps {
+		out.PromptTokens += s.PromptTokens
+		out.CompletionTokens += s.CompletionTokens
+		out.TotalTokens += s.TotalTokens
+		out.PromptMs += s.PromptMs
+		out.EvalMs += s.EvalMs
+		out.TotalMs += s.TotalMs
+		evalMsSum += s.EvalMs
+		if i == 0 {
+			out.TTFTMs = s.TTFTMs
+			out.PromptTokPerSec = s.PromptTokPerSec
+		}
+	}
+	if evalMsSum > 0 && out.CompletionTokens > 0 {
+		out.EvalTokPerSec = float64(out.CompletionTokens) / (evalMsSum / 1000.0)
+	}
+	return &out
+}
+
+func (a *App) recordGeneration(
+	ctx context.Context,
+	profile profiles.Profile,
+	conversationID, conversationTitle, messageID, modelID string,
+	metrics *pluginapi.GenerationMetrics,
+	roleSteps []contracts.GenerationRoleStep,
+) {
+	if a.Metrics == nil {
+		return
+	}
+	if metrics == nil && len(roleSteps) == 0 {
+		return
+	}
+	run := contracts.GenerationRun{
+		ConversationID:    conversationID,
+		ConversationTitle: conversationTitle,
+		MessageID:         messageID,
+		ProfileID:         profile.ID,
+		ProfileName:       profile.Name,
+		ModelID:           modelID,
+		RuntimeID:         "llamacpp",
+		RoleSteps:         roleSteps,
+		CreatedAt:         time.Now().UTC(),
+	}
+	if metrics != nil {
+		run.PromptTokens = metrics.PromptTokens
+		run.CompletionTokens = metrics.CompletionTokens
+		run.TotalTokens = metrics.TotalTokens
+		run.TTFTMs = metrics.TTFTMs
+		run.PromptMs = metrics.PromptMs
+		run.EvalMs = metrics.EvalMs
+		run.TotalMs = metrics.TotalMs
+		run.PromptTokPerSec = metrics.PromptTokPerSec
+		run.EvalTokPerSec = metrics.EvalTokPerSec
+	}
+	if _, err := a.Metrics.Insert(ctx, run); err != nil {
+		a.Logger.Warn("record generation metrics", "error", err)
+	}
+}
+
+// HandleHTTPChat serves POST /api/v1/chat with optional SSE streaming.
+func (a *App) HandleHTTPChat(w http.ResponseWriter, r *http.Request, conversationID, profileID, modelID, message string, stream bool, execution string) error {
+	ch, err := a.RunChat(r.Context(), profileID, conversationID, message, stream, modelID, execution)
+	if err != nil {
+		return err
+	}
+	if !stream {
+		var content string
+		var metrics *pluginapi.GenerationMetrics
+		for chunk := range ch {
+			if chunk.Error != "" {
+				return fmt.Errorf("%s", chunk.Error)
+			}
+			content += chunk.Content
+			if chunk.Metrics != nil {
+				metrics = chunk.Metrics
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		out := map[string]any{"content": content}
+		if metrics != nil {
+			out["metrics"] = metrics
+		}
+		return json.NewEncoder(w).Encode(out)
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return fmt.Errorf("streaming unsupported")
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	for chunk := range ch {
+		if chunk.Error != "" {
+			fmt.Fprintf(w, "event: error\ndata: %s\n\n", chunk.Error)
+			flusher.Flush()
+			return nil
+		}
+		if chunk.Content != "" {
+			data, _ := json.Marshal(map[string]any{"content": chunk.Content})
+			fmt.Fprintf(w, "event: token\ndata: %s\n\n", data)
+			flusher.Flush()
+		}
+		if chunk.Done {
+			payload := map[string]any{}
+			if chunk.Metrics != nil {
+				payload["metrics"] = chunk.Metrics
+			}
+			data, _ := json.Marshal(payload)
+			fmt.Fprintf(w, "event: done\ndata: %s\n\n", data)
+			flusher.Flush()
+		}
+	}
+	return nil
+}
+
+func (a *App) defaultProfileID(ctx context.Context) string {
+	items, err := a.Profiles.List(ctx)
+	if err != nil || len(items) == 0 {
+		return ""
+	}
+	preferred := []string{profiles.PresetGeneral, profiles.PresetProgramming, profiles.PresetResearch}
+	byID := make(map[string]profiles.Profile, len(items))
+	for _, p := range items {
+		byID[p.ID] = p
+	}
+	for _, id := range preferred {
+		if p, ok := byID[id]; ok && len(p.Roles) > 0 {
+			return p.ID
+		}
+	}
+	for _, p := range items {
+		if len(p.Roles) > 0 {
+			return p.ID
+		}
+	}
+	return items[0].ID
+}
+
+func (a *App) nodeDisplayName(nodeID string) string {
+	cfg := a.Config.Get()
+	if nodeID == "" || nodeID == cfg.NodeID {
+		return cfg.NodeName
+	}
+	if a.Nodes == nil {
+		return nodeID
+	}
+	list, err := a.Nodes.List(context.Background())
+	if err != nil {
+		return nodeID
+	}
+	for _, n := range list {
+		if n.ID == nodeID {
+			return n.Name
+		}
+	}
+	return nodeID
+}
+
+// profileNeedsModelFill reports whether empty role model_ids would fail orchestrator validation.
+func profileNeedsModelFill(p profiles.Profile) bool {
+	if p.OrchestratorID == "team" {
+		needed := map[string]bool{"coordinator": false, "worker": false, "reviewer": false}
+		for _, r := range p.Roles {
+			if _, ok := needed[r.Role]; ok && r.ModelID != "" {
+				needed[r.Role] = true
+			}
+		}
+		for _, ok := range needed {
+			if !ok {
+				return true
+			}
+		}
+		return false
+	}
+	for _, r := range p.Roles {
+		if r.ModelID != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// defaultInstalledModelID picks a concrete model for empty profile roles.
+// Prefers the most recently used installed model; skips stub unless it is the only option.
+func (a *App) defaultInstalledModelID(ctx context.Context) (string, error) {
+	if a.Models == nil {
+		return "", fmt.Errorf("no models manager")
+	}
+	list, err := a.Models.List(ctx)
+	if err != nil {
+		return "", err
+	}
+	var (
+		best     string
+		bestUsed time.Time
+		stub     string
+	)
+	for _, m := range list {
+		if m.Status != "installed" {
+			continue
+		}
+		if m.ID == models.StubModelID {
+			stub = m.ID
+			continue
+		}
+		if m.LastUsedAt != nil && (best == "" || m.LastUsedAt.After(bestUsed)) {
+			best = m.ID
+			bestUsed = *m.LastUsedAt
+			continue
+		}
+		if best == "" {
+			best = m.ID
+		}
+	}
+	if best != "" {
+		return best, nil
+	}
+	if stub != "" {
+		return stub, nil
+	}
+	return "", fmt.Errorf("no installed models")
+}
+
+// withChatModel applies the chat UI model selection to a profile for this turn.
+// Team profiles keep their orchestrator, roles, and node pins; empty role models
+// are filled from the UI pick. Other profiles collapse to simple single-agent chat.
+func withChatModel(p profiles.Profile, modelID string) profiles.Profile {
+	out := p
+	if out.NodePolicy.Mode == "" {
+		out.NodePolicy.Mode = "automatic"
+	}
+	if out.OrchestratorID == "team" {
+		out.Roles = fillTeamRoles(out.Roles, modelID)
+		return out
+	}
+	out.OrchestratorID = "simple"
+	out.Roles = []contracts.ModelRole{{
+		Role:     "assistant",
+		ModelID:  modelID,
+		Required: false,
+	}}
+	return out
+}
+
+// applyExecutionPolicy maps Chat UI execution preference onto node_policy.
+func withoutTools(p profiles.Profile) profiles.Profile {
+	if len(p.Tools) == 0 {
+		return p
+	}
+	toolsCopy := make([]contracts.ToolPolicy, len(p.Tools))
+	for i, tool := range p.Tools {
+		tool.Policy = tools.PolicyDeny
+		toolsCopy[i] = tool
+	}
+	p.Tools = toolsCopy
+	return p
+}
+
+func applyExecutionPolicy(p profiles.Profile, execution string) profiles.Profile {
+	switch execution {
+	case "local":
+		p.NodePolicy.Mode = "prefer_local"
+	case "automatic":
+		p.NodePolicy.Mode = "automatic"
+	}
+	return p
+}
+
+func fillTeamRoles(roles []contracts.ModelRole, modelID string) []contracts.ModelRole {
+	needed := []string{"coordinator", "worker", "reviewer"}
+	byRole := make(map[string]contracts.ModelRole, len(roles))
+	order := make([]string, 0, len(roles))
+	for _, r := range roles {
+		if _, seen := byRole[r.Role]; !seen {
+			order = append(order, r.Role)
+		}
+		byRole[r.Role] = r
+	}
+	for _, role := range needed {
+		if _, ok := byRole[role]; !ok {
+			order = append(order, role)
+			byRole[role] = contracts.ModelRole{Role: role, Required: false}
+		}
+	}
+	out := make([]contracts.ModelRole, 0, len(order))
+	for _, role := range order {
+		r := byRole[role]
+		if r.ModelID == "" {
+			r.ModelID = modelID
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+type chatExecEnv struct {
+	app            *App
+	ctx            context.Context
+	profile        profiles.Profile
+	modelOverride  string
+	conversationID string
+	taskID         string
+	turnPrompt     string
+
+	mu         sync.Mutex
+	lastModel  string
+	roleNodes  map[string]string
+	roleModels map[string]string
+	usedNodes  []string
+}
+
+func (e *chatExecEnv) modelID() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.lastModel
+}
+
+func (e *chatExecEnv) ContextLimit() int {
+	catalog := 0
+	id := e.modelOverride
+	if id == "" {
+		id = e.modelID()
+	}
+	if id != "" && e.app != nil && e.app.Models != nil {
+		if entry, ok := e.app.Models.Catalog().Get(id); ok {
+			catalog = entry.Context
+		}
+	}
+	return llamacpp.ContextWindow(catalog)
+}
+
+func (e *chatExecEnv) PriorMessages(ctx context.Context) []pluginapi.ChatMessage {
+	if e.conversationID == "" || e.app == nil || e.app.Conversations == nil {
+		return nil
+	}
+	stored, err := e.app.Conversations.ListMessages(ctx, e.conversationID)
+	if err != nil {
+		return nil
+	}
+	return contextusage.WithoutCurrentTurn(stored, e.turnPrompt)
+}
+
+func (e *chatExecEnv) roleNode(role string) (string, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	id, ok := e.roleNodes[role]
+	return id, ok
+}
+
+func (e *chatExecEnv) roleModel(role string) (string, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	id, ok := e.roleModels[role]
+	return id, ok
+}
+
+func (e *chatExecEnv) Generate(ctx context.Context, role string, messages []pluginapi.ChatMessage) (<-chan pluginapi.ChatChunk, error) {
+	modelID := e.modelForRole(role)
+	e.mu.Lock()
+	e.lastModel = modelID
+	e.mu.Unlock()
+	nodeID, err := e.NodeForRole(role)
+	if err != nil {
+		return nil, err
+	}
+	e.app.Bus.Publish(events.New(events.ModelLoadStarted, map[string]any{
+		"model_id": modelID, "node_id": nodeID, "role": role,
+		"node_name": e.app.nodeDisplayName(nodeID),
+	}))
+	ch, err := e.app.generateOnNode(ctx, nodeID, modelID, role, messages)
+	if err != nil {
+		return nil, err
+	}
+	e.app.Bus.Publish(events.New(events.ModelLoadCompleted, map[string]any{
+		"model_id": modelID, "node_id": nodeID, "role": role,
+		"node_name": e.app.nodeDisplayName(nodeID),
+	}))
+	return ch, nil
+}
+
+func (e *chatExecEnv) ExecuteTool(ctx context.Context, toolID string, args map[string]any) (map[string]any, error) {
+	policy := tools.PolicyForProfile(e.profile, toolID)
+	meta := map[string]any{}
+	if e.conversationID != "" {
+		meta["conversation_id"] = e.conversationID
+	}
+	if e.taskID != "" {
+		meta["task_id"] = e.taskID
+	}
+	return e.app.Tools.Execute(ctx, toolID, args, policy, "chat requested tool", meta)
+}
+
+func (e *chatExecEnv) Emit(eventType string, payload map[string]any) {
+	if payload == nil {
+		payload = map[string]any{}
+	} else {
+		cp := make(map[string]any, len(payload)+4)
+		for k, v := range payload {
+			cp[k] = v
+		}
+		payload = cp
+	}
+	if e.conversationID != "" {
+		if _, ok := payload["conversation_id"]; !ok {
+			payload["conversation_id"] = e.conversationID
+		}
+	}
+	if e.taskID != "" {
+		if _, ok := payload["task_id"]; !ok {
+			payload["task_id"] = e.taskID
+		}
+	}
+	if e.app.Tools != nil && (eventType == events.ToolParsed || eventType == events.ToolFailed) {
+		toolID, _ := payload["tool_id"].(string)
+		status := "parsed"
+		if accepted, ok := payload["accepted"].(bool); ok && !accepted {
+			status = "rejected"
+		}
+		if eventType == events.ToolFailed {
+			status = "failed"
+		}
+		if sanitized, _ := payload["sanitized"].(bool); sanitized {
+			status = "sanitized"
+		}
+		errText, _ := payload["error"].(string)
+		format, _ := payload["format"].(string)
+		e.app.Tools.Note(tools.Activity{
+			ToolID:  toolID,
+			Status:  status,
+			Summary: format,
+			Error:   errText,
+		})
+	}
+	if eventType == events.OrchestrationRole || eventType == "orchestration.role" {
+		if nodeID, ok := payload["node_id"].(string); ok && nodeID != "" {
+			if _, has := payload["node_name"]; !has {
+				payload["node_name"] = e.app.nodeDisplayName(nodeID)
+			}
+		}
+	}
+	e.app.Bus.Publish(events.New(eventType, payload))
+}
+
+func (e *chatExecEnv) NodeForRole(role string) (string, error) {
+	e.mu.Lock()
+	if e.roleNodes == nil {
+		e.roleNodes = map[string]string{}
+	}
+	if e.roleModels == nil {
+		e.roleModels = map[string]string{}
+	}
+	if id, ok := e.roleNodes[role]; ok && id != "" {
+		e.mu.Unlock()
+		return id, nil
+	}
+	avoid := append([]string(nil), e.usedNodes...)
+	e.mu.Unlock()
+
+	modelID := e.modelForRole(role)
+	nodeID, err := e.app.placeRoleAvoiding(e.ctx, e.profile, role, modelID, avoid)
+	if err != nil {
+		return "", err
+	}
+
+	e.mu.Lock()
+	e.roleNodes[role] = nodeID
+	e.roleModels[role] = modelID
+	e.lastModel = modelID
+	seen := false
+	for _, id := range e.usedNodes {
+		if id == nodeID {
+			seen = true
+			break
+		}
+	}
+	if !seen && nodeID != "" {
+		e.usedNodes = append(e.usedNodes, nodeID)
+	}
+	e.mu.Unlock()
+	return nodeID, nil
+}
+
+func (e *chatExecEnv) modelForRole(role string) string {
+	for _, r := range e.profile.Roles {
+		if r.Role == role && r.ModelID != "" {
+			return r.ModelID
+		}
+	}
+	if e.modelOverride != "" {
+		return e.modelOverride
+	}
+	for _, r := range e.profile.Roles {
+		if r.ModelID != "" {
+			return r.ModelID
+		}
+	}
+	return ""
+}
+
+// ListNodesAdapter for task manager.
+func (a *App) listNodes(ctx context.Context) ([]contracts.Node, error) {
+	return a.listNodesWithHardware(ctx)
+}

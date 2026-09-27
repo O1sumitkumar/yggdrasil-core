@@ -1,0 +1,478 @@
+import type {
+  AIProfile,
+  APIKeyRecord,
+  BrowseModel,
+  ChatRequest,
+  ChatResponse,
+  Conversation,
+  CreateAPIKeyResponse,
+  CreateConversationRequest,
+  DiagnosticsExportResult,
+  GenerationRun,
+  BenchmarkJob,
+  BenchmarkRequest,
+  BenchmarkWorkload,
+  HardwareInventory,
+  HealthResponse,
+  InstallFromURLRequest,
+  LogContent,
+  LogEntry,
+  Message,
+  ToolActivityRecord,
+  ToolRecord,
+  Model,
+  ModelsFitResponse,
+  Node,
+  PairingSession,
+  Recommendation,
+  RunningModelView,
+  RuntimeInfo,
+  SettingsPatch,
+  SettingsView,
+  Task,
+  UpdateConversationRequest,
+  VersionResponse,
+} from '@/types/api'
+
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+    public readonly code?: string,
+  ) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
+function strField(raw: Record<string, unknown>, snake: string, pascal: string): string {
+  const a = raw[snake]
+  const b = raw[pascal]
+  if (typeof a === 'string' && a) return a
+  if (typeof b === 'string' && b) return b
+  if (typeof a === 'string') return a
+  if (typeof b === 'string') return b
+  return ''
+}
+
+/** Accepts snake_case (current) or PascalCase (older daemon) pairing payloads. */
+export function normalizePairingSession(raw: Record<string, unknown>): PairingSession {
+  return {
+    id: strField(raw, 'id', 'ID'),
+    local_node_id: strField(raw, 'local_node_id', 'LocalNodeID'),
+    remote_node_id: strField(raw, 'remote_node_id', 'RemoteNodeID'),
+    remote_name: strField(raw, 'remote_name', 'RemoteName'),
+    remote_address: strField(raw, 'remote_address', 'RemoteAddr') || undefined,
+    code: strField(raw, 'code', 'Code'),
+    state: strField(raw, 'state', 'State'),
+    created_at: strField(raw, 'created_at', 'CreatedAt'),
+    expires_at: strField(raw, 'expires_at', 'ExpiresAt'),
+    incoming: Boolean(raw.incoming ?? raw.Incoming),
+  }
+}
+
+export function getApiBase(): string {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+  const w = window as YggdrasilWindow
+  return w.__YGGDRASIL_API_BASE__ ?? ''
+}
+
+async function parseJson<T>(response: Response): Promise<T | null> {
+  const text = await response.text()
+  if (!text) {
+    return null
+  }
+  return JSON.parse(text) as T
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T | null> {
+  const url = `${getApiBase()}${path}`
+
+  let response: Response
+  try {
+    response = await fetch(url, {
+      ...init,
+      headers: {
+        Accept: 'application/json',
+        ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+        ...init?.headers,
+      },
+    })
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : 'network error'
+    throw new ApiError(
+      0,
+      `Could not reach the local Yggdrasil service (${detail}). If this is the desktop app, quit and reopen it so the daemon restarts.`,
+    )
+  }
+
+  if (response.status === 404) {
+    return null
+  }
+
+  if (!response.ok) {
+    const body = await parseJson<{ error?: { code?: string; message?: string } }>(response)
+    throw new ApiError(
+      response.status,
+      body?.error?.message ?? response.statusText ?? `HTTP ${response.status}`,
+      body?.error?.code,
+    )
+  }
+
+  if (response.status === 204) {
+    return null
+  }
+
+  return parseJson<T>(response)
+}
+
+export async function endpointExists(path: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${getApiBase()}${path}`, { method: 'HEAD' })
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
+export interface StreamChatOptions {
+  body: ChatRequest
+  signal?: AbortSignal
+  onToken: (content: string) => void
+  onDone?: () => void
+  onError?: (message: string) => void
+}
+
+export async function streamChat({
+  body,
+  signal,
+  onToken,
+  onDone,
+  onError,
+}: StreamChatOptions): Promise<void> {
+  const url = `${getApiBase()}/api/v1/chat`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Accept: 'text/event-stream',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ ...body, stream: true }),
+    signal,
+  })
+
+  if (!response.ok) {
+    const errBody = await parseJson<{ error?: { message?: string } }>(response)
+    throw new ApiError(
+      response.status,
+      errBody?.error?.message ?? response.statusText,
+    )
+  }
+
+  const reader = response.body?.getReader()
+  if (!reader) {
+    throw new ApiError(500, 'Streaming not supported')
+  }
+
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let currentEvent = 'message'
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) {
+      break
+    }
+
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+
+    for (const line of lines) {
+      if (line.startsWith('event:')) {
+        currentEvent = line.slice(6).trim()
+        continue
+      }
+      if (!line.startsWith('data:')) {
+        continue
+      }
+      const data = line.slice(5).trim()
+      if (currentEvent === 'error') {
+        onError?.(data)
+        return
+      }
+      if (currentEvent === 'token') {
+        try {
+          const parsed = JSON.parse(data) as { content?: string }
+          if (parsed.content) {
+            onToken(parsed.content)
+          }
+        } catch {
+          // ignore malformed token payloads
+        }
+      }
+      if (currentEvent === 'done') {
+        onDone?.()
+        return
+      }
+    }
+  }
+
+  onDone?.()
+}
+
+export const api = {
+  getHealth: () => request<HealthResponse>('/api/v1/health'),
+
+  getVersion: () => request<VersionResponse>('/api/v1/version'),
+
+  getHardware: () => request<HardwareInventory>('/api/v1/hardware'),
+
+  getModels: () => request<Model[]>('/api/v1/models'),
+
+  recommendModels: (purpose: string) =>
+    request<Recommendation>(`/api/v1/models/recommend?purpose=${encodeURIComponent(purpose)}`),
+
+  getModelsFit: () => request<ModelsFitResponse[]>('/api/v1/models/fit'),
+
+  browseModels: (q = '', limit = 24) => {
+    const params = new URLSearchParams()
+    if (q) params.set('q', q)
+    params.set('limit', String(limit))
+    return request<BrowseModel[]>(`/api/v1/models/browse?${params}`)
+  },
+
+  listRunningModels: () => request<RunningModelView[]>('/api/v1/models/running'),
+
+  installModel: (id: string, opts?: { wait?: boolean; node_id?: string }) => {
+    const params = new URLSearchParams()
+    if (opts?.wait) params.set('wait', 'true')
+    if (opts?.node_id) params.set('node_id', opts.node_id)
+    const qs = params.toString()
+    return request<{ status: string; model_id: string }>(
+      `/api/v1/models/${id}/install${qs ? `?${qs}` : ''}`,
+      {
+        method: 'POST',
+        body: opts?.node_id ? JSON.stringify({ node_id: opts.node_id }) : undefined,
+      },
+    )
+  },
+
+  installModelFromURL: (body: InstallFromURLRequest) =>
+    request<{ status: string; model_id: string }>('/api/v1/models/install-from-url', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  startModel: (id: string, nodeId?: string) =>
+    request<RunningModelView>(`/api/v1/models/${id}/start`, {
+      method: 'POST',
+      body: JSON.stringify({ node_id: nodeId ?? '' }),
+    }),
+
+  stopModel: (id: string, opts?: { instance_id?: string; node_id?: string }) =>
+    request<{ ok: boolean }>(`/api/v1/models/${id}/stop`, {
+      method: 'POST',
+      body: JSON.stringify({
+        instance_id: opts?.instance_id ?? '',
+        node_id: opts?.node_id ?? '',
+      }),
+    }),
+
+  deleteModel: (id: string, opts?: { node_id?: string }) => {
+    const params = new URLSearchParams()
+    if (opts?.node_id) params.set('node_id', opts.node_id)
+    const qs = params.toString()
+    return request<null>(`/api/v1/models/${id}${qs ? `?${qs}` : ''}`, {
+      method: 'DELETE',
+      body: opts?.node_id ? JSON.stringify({ node_id: opts.node_id }) : undefined,
+    })
+  },
+
+  listRuntimes: () => request<RuntimeInfo[]>('/api/v1/runtimes'),
+
+  installRuntime: (id: string) =>
+    request<{ status: string; runtime_id: string }>(`/api/v1/runtimes/${id}/install`, {
+      method: 'POST',
+    }),
+
+  getProfiles: () => request<AIProfile[]>('/api/v1/profiles'),
+
+  createProfile: (profile: Omit<AIProfile, 'id'> & { id?: string }) =>
+    request<AIProfile>('/api/v1/profiles', {
+      method: 'POST',
+      body: JSON.stringify(profile),
+    }),
+
+  updateProfile: (id: string, profile: Partial<AIProfile> & { roles?: AIProfile['roles'] }) =>
+    request<AIProfile>(`/api/v1/profiles/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(profile),
+    }),
+
+  deleteProfile: (id: string) =>
+    request<null>(`/api/v1/profiles/${id}`, { method: 'DELETE' }),
+
+  listTools: () => request<ToolRecord[]>('/api/v1/tools'),
+  toolActivity: () => request<ToolActivityRecord[]>('/api/v1/tools/activity'),
+  setToolEnabled: (id: string, enabled: boolean) =>
+    request<{ id: string; enabled: boolean }>(`/api/v1/tools/${encodeURIComponent(id)}/enabled`, {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    }),
+  testTool: (id: string, args: Record<string, unknown>) =>
+    request<Record<string, unknown>>(`/api/v1/tools/${encodeURIComponent(id)}/test`, {
+      method: 'POST',
+      body: JSON.stringify({ args }),
+    }),
+
+  decideTool: (body: {
+    request_id: string
+    allow: boolean
+    allow_session?: boolean
+  }) =>
+    request<{ status: string }>('/api/v1/tools/decide', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  getNodes: () => request<Node[]>('/api/v1/nodes'),
+
+  refreshNodes: () =>
+    request<Node[]>('/api/v1/nodes/refresh', {
+      method: 'POST',
+      body: '{}',
+    }),
+
+  pairNode: async (nodeId: string) => {
+    const raw = await request<Record<string, unknown>>('/api/v1/nodes/pair', {
+      method: 'POST',
+      body: JSON.stringify({ node_id: nodeId }),
+    })
+    return raw ? normalizePairingSession(raw) : null
+  },
+
+  listPairingOffers: async () => {
+    const raw = await request<Record<string, unknown>[]>('/api/v1/nodes/pairing/pending')
+    return (raw ?? []).map(normalizePairingSession)
+  },
+
+  claimPairing: async (nodeId: string, code: string) => {
+    const raw = await request<Record<string, unknown>>('/api/v1/nodes/pair/claim', {
+      method: 'POST',
+      body: JSON.stringify({ node_id: nodeId, code }),
+    })
+    return raw ? normalizePairingSession(raw) : null
+  },
+
+  approvePairing: async (sessionId: string, code?: string) => {
+    const raw = await request<Record<string, unknown>>(`/api/v1/nodes/${sessionId}/pair/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ code: code ?? '' }),
+    })
+    return raw ? normalizePairingSession(raw) : null
+  },
+
+  revokeNode: (id: string) =>
+    request<null>(`/api/v1/nodes/${id}/revoke`, { method: 'POST' }),
+
+  listApiKeys: () => request<APIKeyRecord[]>('/api/v1/api-keys'),
+
+  createApiKey: (name: string) =>
+    request<CreateAPIKeyResponse>('/api/v1/api-keys', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+
+  deleteApiKey: (id: string) =>
+    request<null>(`/api/v1/api-keys/${id}`, { method: 'DELETE' }),
+
+  rotateApiKey: (id: string) =>
+    request<CreateAPIKeyResponse>(`/api/v1/api-keys/${id}/rotate`, {
+      method: 'POST',
+    }),
+
+  getSettings: () => request<SettingsView>('/api/v1/settings'),
+
+  updateSettings: (patch: SettingsPatch) =>
+    request<SettingsView>('/api/v1/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+
+  resetApp: (opts?: { delete_models?: boolean }) =>
+    request<SettingsView>('/api/v1/settings/reset', {
+      method: 'POST',
+      body: JSON.stringify({ delete_models: Boolean(opts?.delete_models) }),
+    }),
+
+  getConversations: () => request<Conversation[]>('/api/v1/conversations'),
+
+  createConversation: (body: CreateConversationRequest) =>
+    request<Conversation>('/api/v1/conversations', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  updateConversation: (id: string, body: UpdateConversationRequest) =>
+    request<Conversation>(`/api/v1/conversations/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+
+  deleteConversation: (id: string) =>
+    request<null>(`/api/v1/conversations/${id}`, {
+      method: 'DELETE',
+    }),
+
+  getMessages: (conversationId: string) =>
+    request<Message[]>(`/api/v1/conversations/${conversationId}/messages`),
+
+  sendChat: (body: ChatRequest) =>
+    request<ChatResponse>('/api/v1/chat', {
+      method: 'POST',
+      body: JSON.stringify({ ...body, stream: false }),
+    }),
+
+  listLogs: () => request<LogEntry[]>('/api/v1/logs'),
+
+  getPerformance: (opts?: { sort?: string; order?: 'asc' | 'desc'; limit?: number }) => {
+    const params = new URLSearchParams()
+    if (opts?.sort) params.set('sort', opts.sort)
+    if (opts?.order) params.set('order', opts.order)
+    if (opts?.limit) params.set('limit', String(opts.limit))
+    const qs = params.toString()
+    return request<GenerationRun[]>(`/api/v1/performance${qs ? `?${qs}` : ''}`)
+  },
+
+  listTasks: () => request<Task[]>('/api/v1/tasks'),
+
+  listBenchmarkWorkloads: () =>
+    request<BenchmarkWorkload[]>('/api/v1/benchmarks/workloads'),
+
+  listBenchmarks: () => request<BenchmarkJob[]>('/api/v1/benchmarks'),
+
+  startBenchmark: (body: BenchmarkRequest) =>
+    request<BenchmarkJob>('/api/v1/benchmarks', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  getBenchmark: (id: string) => request<BenchmarkJob>(`/api/v1/benchmarks/${id}`),
+
+  cancelBenchmark: (id: string) =>
+    request<{ ok: boolean }>(`/api/v1/benchmarks/${id}/cancel`, { method: 'POST' }),
+
+  getLog: (name: string, tailBytes = 262144) =>
+    request<LogContent>(
+      `/api/v1/logs/${encodeURIComponent(name)}?tail_bytes=${tailBytes}`,
+    ),
+
+  exportDiagnostics: (includeConversations = false) =>
+    request<DiagnosticsExportResult>('/api/v1/diagnostics', {
+      method: 'POST',
+      body: JSON.stringify({ include_conversations: includeConversations }),
+    }),
+}

@@ -1,0 +1,586 @@
+export interface ErrorBody {
+  code: string
+  message: string
+  details?: Record<string, unknown>
+}
+
+export interface APIError {
+  error: ErrorBody
+}
+
+export interface HealthResponse {
+  status: string
+  product: string
+  version: string
+}
+
+export interface VersionResponse {
+  version: string
+  commit: string
+  build_date: string
+  product: string
+}
+
+export interface CPUInfo {
+  model: string
+  cores: number
+  threads?: number
+}
+
+export interface MemoryInfo {
+  total_bytes: number
+  available_bytes?: number
+  swap_total_bytes?: number
+  swap_used_bytes?: number
+}
+
+export interface DiskInfo {
+  path: string
+  total_bytes: number
+  available_bytes: number
+}
+
+export interface Accelerator {
+  id: string
+  vendor: string
+  model: string
+  kind: string
+  dedicated_vram_bytes?: number
+  unified_memory_bytes?: number
+  backends?: string[]
+}
+
+export interface HardwareInventory {
+  os: string
+  arch: string
+  hostname?: string
+  cpu: CPUInfo
+  memory: MemoryInfo
+  disk: DiskInfo
+  accelerators: Accelerator[]
+  detected_at: string
+}
+
+export interface ModelCapabilities {
+  tool_calling: boolean
+  vision: boolean
+  coding: boolean
+}
+
+export interface ModelSource {
+  url: string
+  sha256?: string
+  format?: string
+}
+
+export interface Model {
+  id: string
+  display_name: string
+  summary?: string
+  family?: string
+  variant?: string
+  parameters?: string
+  size_bytes?: number
+  memory_needed_bytes?: number
+  context?: number
+  capabilities: ModelCapabilities
+  source?: ModelSource
+  purpose?: string[]
+  tags?: string[]
+  runtime?: string[]
+  recommended_roles?: string[]
+  installed: boolean
+  installed_on?: { node_id: string; node_name: string }[]
+  status?: string
+  last_used_at?: string
+  fit?: ModelFit
+  dynamic?: boolean
+}
+
+export type FitLabel = 'excellent' | 'good' | 'tight' | 'heavy' | 'unsupported' | 'too_large'
+
+export interface ModelFit {
+  model_id: string
+  node_id?: string
+  node_name?: string
+  label: FitLabel
+  expected_memory_bytes: number
+  reason?: string
+  est_tok_per_sec?: number
+  tok_per_sec_measured?: boolean
+  runtime_memory_low_bytes?: number
+  runtime_memory_high_bytes?: number
+  weight_bytes?: number
+  quantization?: string
+  approximate?: boolean
+  context_tokens?: number
+  total_memory_bytes?: number
+  available_memory_bytes?: number
+  memory_kind?: 'unified' | 'system' | ''
+  headroom?: number
+  install_allowed?: boolean
+  runtime_warning?: string
+  recommendations?: string[]
+  gpu_note?: string
+  known_to_run?: boolean
+}
+
+export interface CategoryWinner {
+  category: string
+  label: string
+  model_id: string
+}
+
+export interface ModelsFitResponse {
+  node_id?: string
+  node_name?: string
+  memory_bytes: number
+  fits: ModelFit[]
+  winners: CategoryWinner[]
+}
+
+export interface RunningModelView {
+  model_id: string
+  display_name: string
+  instance_id: string
+  node_id: string
+  node_name: string
+  status: string
+  memory_bytes?: number
+  endpoint?: string
+  speed_tok_per_sec?: number
+  used_by_profiles?: string[]
+  accelerator?: string
+  last_used_at?: string
+}
+
+export interface BrowseModel {
+  id: string
+  display_name: string
+  summary?: string
+  repo_id: string
+  filename: string
+  source_url: string
+  size_bytes?: number
+  parameters?: string
+  variant?: string
+  downloads?: number
+  tags?: string[]
+}
+
+export interface InstallFromURLRequest {
+  source_url: string
+  display_name?: string
+  id?: string
+  filename?: string
+  size_bytes?: number
+  parameters?: string
+  variant?: string
+  tags?: string[]
+  node_id?: string
+}
+
+export interface ModelRole {
+  role: string
+  model_id: string
+  node_id?: string
+  required: boolean
+}
+
+export interface ToolPolicy {
+  tool_id: string
+  policy: 'deny' | 'ask' | 'allow-for-session' | 'allow'
+}
+
+export interface ToolRecord {
+  id: string
+  name: string
+  description: string
+  capability: string
+  source: string
+  schema: string
+  default_policy: string
+  risk: string
+  enabled: boolean
+  profiles: string[]
+}
+
+export interface ToolActivityRecord {
+  tool_id: string
+  status: string
+  summary?: string
+  duration_ms?: number
+  error?: string
+  at: string
+}
+
+export interface NodePolicy {
+  mode: 'automatic' | 'prefer_local' | 'manual'
+}
+
+export interface AIProfile {
+  id: string
+  name: string
+  purpose: string
+  orchestrator_id: string
+  roles: ModelRole[]
+  tools?: ToolPolicy[]
+  node_policy: NodePolicy
+}
+
+export type NodeStatus = 'online' | 'offline' | 'unknown'
+
+export interface Node {
+  id: string
+  name: string
+  os: string
+  arch: string
+  status: NodeStatus
+  is_local: boolean
+  paired: boolean
+  hardware?: HardwareInventory
+  last_seen_at?: string
+  address?: string
+}
+
+export interface Conversation {
+  id: string
+  title: string
+  profile_id?: string
+  model_id?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface Message {
+  id: string
+  conversation_id: string
+  role: string
+  content: string
+  created_at: string
+}
+
+export interface SettingsView {
+  data_dir: string
+  models_dir: string
+  runtimes_dir: string
+  logs_dir: string
+  api_host: string
+  api_port: number
+  lan_api_enabled: boolean
+  web_ui_enabled: boolean
+  discovery_enabled: boolean
+  node_name: string
+  node_id: string
+  advanced_mode: boolean
+  model_lifecycle: 'automatic' | 'manual'
+  idle_unload_minutes: number
+  keep_running_in_background: boolean
+  default_profile_id?: string
+  default_execution?: 'automatic' | 'local' | 'ask'
+  download_behavior?: 'ask' | 'automatic'
+  model_storage_limit_gb?: number
+  save_chat_history?: boolean
+  save_task_history?: boolean
+  notify_task_finish?: boolean
+  notify_peer_offline?: boolean
+  tool_terminal?: string
+  tool_file_writes?: string
+  tool_git?: string
+  launch_at_login?: boolean
+  discovery_needs_restart?: boolean
+}
+
+export interface Recommendation {
+  purpose: string
+  roles: ModelRole[]
+  models: Model[]
+  reason: string
+  estimated_storage_bytes: number
+  estimated_vram_bytes: number
+}
+
+export type Purpose = 'general' | 'coding' | 'research' | 'custom'
+
+export interface ChatRequest {
+  conversation_id: string
+  profile_id?: string
+  model_id?: string
+  message: string
+  stream?: boolean
+  execution?: 'automatic' | 'local'
+}
+
+export interface ChatResponse {
+  content: string
+}
+
+export interface CreateConversationRequest {
+  title?: string
+  profile_id?: string
+  model_id?: string
+}
+
+export interface UpdateConversationRequest {
+  title?: string
+  profile_id?: string
+  model_id?: string
+}
+
+export interface RuntimeDetection {
+  installed: boolean
+  version?: string
+  path?: string
+  message?: string
+}
+
+export interface RuntimeInfo {
+  id: string
+  display_name: string
+  detection: RuntimeDetection
+  status: string
+}
+
+export interface APIKeyRecord {
+  id: string
+  name: string
+  prefix: string
+  created_at: string
+  last_used_at?: string
+  revoked: boolean
+}
+
+export interface CreateAPIKeyResponse {
+  key: APIKeyRecord
+  secret: string
+}
+
+export interface PairNodeRequest {
+  node_id: string
+}
+
+export interface PairingSession {
+  id: string
+  local_node_id: string
+  remote_node_id: string
+  remote_name: string
+  remote_address?: string
+  code: string
+  state: string
+  created_at: string
+  expires_at: string
+  incoming?: boolean
+}
+
+export interface YggdrasilEvent {
+  id: string
+  type: string
+  timestamp: string
+  task_id?: string
+  node_id?: string
+  payload?: Record<string, unknown>
+}
+
+export interface ModelDownloadProgressPayload {
+  model_id: string
+  bytes_downloaded: number
+  bytes_total: number
+  percent: number
+}
+
+export interface ChatTokenPayload {
+  conversation_id: string
+  content: string
+}
+
+export interface OrchestrationRolePayload {
+  conversation_id?: string
+  role: string
+  node_id?: string
+  node_name?: string
+  task_id?: string
+}
+
+export interface ToolRequestedPayload {
+  request_id: string
+  tool_id: string
+  args?: Record<string, unknown>
+  reason?: string
+  conversation_id?: string
+  task_id?: string
+}
+
+export interface SettingsPatch {
+  node_name?: string
+  lan_api_enabled?: boolean
+  discovery_enabled?: boolean
+  web_ui_enabled?: boolean
+  advanced_mode?: boolean
+  model_lifecycle?: 'automatic' | 'manual'
+  idle_unload_minutes?: number
+  keep_running_in_background?: boolean
+  default_profile_id?: string
+  default_execution?: 'automatic' | 'local' | 'ask'
+  download_behavior?: 'ask' | 'automatic'
+  model_storage_limit_gb?: number
+  save_chat_history?: boolean
+  save_task_history?: boolean
+  notify_task_finish?: boolean
+  notify_peer_offline?: boolean
+  tool_terminal?: string
+  tool_file_writes?: string
+  tool_git?: string
+  launch_at_login?: boolean
+}
+
+export interface LogEntry {
+  name: string
+  kind: string
+  size_bytes: number
+  modified_at: string
+  label: string
+}
+
+export interface LogContent {
+  name: string
+  kind: string
+  label: string
+  content: string
+  truncated: boolean
+  size_bytes: number
+}
+
+export interface DiagnosticsExportResult {
+  path: string
+  message?: string
+}
+
+export interface GenerationRoleStep {
+  role: string
+  node_id?: string
+  node_name?: string
+  model_id?: string
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  ttft_ms: number
+  prompt_ms: number
+  eval_ms: number
+  total_ms: number
+  prompt_tok_per_sec: number
+  eval_tok_per_sec: number
+}
+
+export interface GenerationRun {
+  id: string
+  conversation_id?: string
+  conversation_title?: string
+  message_id?: string
+  profile_id?: string
+  profile_name?: string
+  model_id: string
+  runtime_id: string
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  ttft_ms: number
+  prompt_ms: number
+  eval_ms: number
+  total_ms: number
+  prompt_tok_per_sec: number
+  eval_tok_per_sec: number
+  role_steps?: GenerationRoleStep[]
+  cross_machine?: boolean
+  node_count?: number
+  created_at: string
+}
+
+export interface BenchmarkPrompt {
+  id: string
+  label: string
+  text: string
+}
+
+export interface BenchmarkWorkload {
+  id: string
+  name: string
+  description: string
+  prompts: BenchmarkPrompt[]
+}
+
+export interface BenchmarkRequest {
+  model_ids: string[]
+  workload_ids: string[]
+  runs?: number
+}
+
+export interface BenchmarkProgress {
+  percent: number
+  phase: string
+  current_model?: string
+  current_workload?: string
+  current_prompt?: string
+  completed_steps: number
+  total_steps: number
+  message?: string
+}
+
+export interface BenchmarkSample {
+  model_id: string
+  workload_id: string
+  prompt_id: string
+  run_index: number
+  warmup: boolean
+  load_ms?: number
+  ttft_ms: number
+  prompt_ms: number
+  eval_ms: number
+  total_ms: number
+  prompt_tok_per_sec: number
+  eval_tok_per_sec: number
+  prompt_tokens: number
+  completion_tokens: number
+  error?: string
+}
+
+export interface BenchmarkModelSummary {
+  model_id: string
+  workload_id: string
+  samples: number
+  avg_ttft_ms: number
+  avg_prompt_ms: number
+  avg_eval_ms: number
+  avg_total_ms: number
+  avg_prompt_tok_per_sec: number
+  avg_eval_tok_per_sec: number
+  load_ms?: number
+  winner_score: number
+}
+
+export interface BenchmarkJob {
+  id: string
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+  request: BenchmarkRequest
+  progress: BenchmarkProgress
+  samples: BenchmarkSample[]
+  summaries: BenchmarkModelSummary[]
+  winners: Record<string, string>
+  error?: string
+  created_at: string
+  started_at?: string
+  completed_at?: string
+}
+
+export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+
+export interface Task {
+  id: string
+  profile_id: string
+  conversation_id?: string
+  prompt: string
+  status: TaskStatus
+  result?: string
+  error?: string
+  created_at: string
+}
+

@@ -1,0 +1,996 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
+import { api } from '@/lib/api'
+import { blankProfileTemplate, profileTemplateFromPurpose } from '@/lib/profilePresets'
+import { useUIStore } from '@/stores/uiStore'
+import type { AIProfile, ModelRole, ToolPolicy } from '@/types/api'
+import { CAPABILITIES, capabilityEnabled, setCapability } from './capabilities'
+import {
+  computerSelectionLabel,
+  createStartOptions,
+  filterProfiles,
+  isBuiltInProfile,
+  orchestratorLabel,
+  PURPOSE_LABELS,
+  purposeIcon,
+  roleDisplayName,
+  roleHelp,
+  roleHint,
+  sortProfilesForDisplay,
+  toolChipPreview,
+  toolSummary,
+  type CreateStartFrom,
+  type ProfileFilter,
+} from './profilePresentation'
+
+const TOOL_CATALOG: {
+  id: string
+  label: string
+  description: string
+}[] = [
+  {
+    id: 'internet.search',
+    label: 'Web search',
+    description: 'Searches the public web and returns titles, links, and snippets.',
+  },
+  {
+    id: 'internet.open',
+    label: 'Open web page',
+    description: 'Opens a URL and returns readable text.',
+  },
+  {
+    id: 'filesystem.search',
+    label: 'Find files',
+    description: 'Finds files in the workspace by name.',
+  },
+  {
+    id: 'filesystem.read',
+    label: 'Read file',
+    description:
+      'Lets the assistant open files inside your Yggdrasil workspace so it can quote or summarize real content.',
+  },
+  {
+    id: 'filesystem.write',
+    label: 'Write file',
+    description:
+      'Lets the assistant create or update files in the workspace.',
+  },
+  {
+    id: 'terminal',
+    label: 'Terminal',
+    description:
+      'Runs shell commands on this computer.',
+  },
+  {
+    id: 'git.status',
+    label: 'Git status',
+    description: 'Shows which files are changed so the assistant can reason about your working tree.',
+  },
+  {
+    id: 'git.diff',
+    label: 'Git diff',
+    description: 'Shows the actual code changes so the assistant can review or explain a patch.',
+  },
+  {
+    id: 'git.log',
+    label: 'Git log',
+    description: 'Shows recent commits in the workspace.',
+  },
+  {
+    id: 'git.show',
+    label: 'Git show',
+    description: 'Shows one commit.',
+  },
+  {
+    id: 'git.add',
+    label: 'Git add',
+    description: 'Stages files for commit. Useful when you want help preparing a commit.',
+  },
+  {
+    id: 'git.commit',
+    label: 'Git commit',
+    description:
+      'Creates a local git commit.',
+  },
+  {
+    id: 'git.push',
+    label: 'Git push',
+    description: 'Pushes commits to the remote.',
+  },
+]
+
+const POLICY_OPTIONS: {
+  value: ToolPolicy['policy']
+  label: string
+  description: string
+}[] = [
+  {
+    value: 'deny',
+    label: 'Deny',
+    description: 'Never available to this profile.',
+  },
+  {
+    value: 'ask',
+    label: 'Ask each time',
+    description: 'Shows an in-chat prompt before every use.',
+  },
+  {
+    value: 'allow-for-session',
+    label: 'Ask once per session',
+    description: 'Prompts the first time, then remembers until you restart the app.',
+  },
+  {
+    value: 'allow',
+    label: 'Always allow',
+    description: 'Runs without asking. Best for low-risk tools you use often.',
+  },
+]
+
+function defaultToolsFrom(profile: AIProfile): ToolPolicy[] {
+  const existing = new Map((profile.tools ?? []).map((t) => [t.tool_id, t.policy]))
+  return TOOL_CATALOG.map((tool) => ({
+    tool_id: tool.id,
+    policy: existing.get(tool.id) ?? 'allow',
+  }))
+}
+
+function PurposeGlyph({ purpose }: { purpose: string }) {
+  const kind = purposeIcon(purpose)
+  const common = 'h-4 w-4 shrink-0 text-primary'
+  if (kind === 'coding') {
+    return (
+      <svg className={common} viewBox="0 0 16 16" fill="none" aria-hidden>
+        <path
+          d="M5.5 3.5 2 8l3.5 4.5M10.5 3.5 14 8l-3.5 4.5M9 3 7 13"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    )
+  }
+  if (kind === 'research') {
+    return (
+      <svg className={common} viewBox="0 0 16 16" fill="none" aria-hidden>
+        <path
+          d="M8 2.5 13 8l-5 5.5L3 8l5-5.5Z"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinejoin="round"
+        />
+      </svg>
+    )
+  }
+  if (kind === 'custom') {
+    return (
+      <svg className={common} viewBox="0 0 16 16" fill="none" aria-hidden>
+        <path
+          d="M6.2 2.8h3.6l.4 1.6 1.5.9 1.6-.3 1.8 3.1-1.2 1.2v1.4l1.2 1.2-1.8 3.1-1.6-.3-1.5.9-.4 1.6H6.2l-.4-1.6-1.5-.9-1.6.3L1 10.9l1.2-1.2V8.3L1 7.1 2.8 4l1.6.3 1.5-.9.3-1.6Z"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinejoin="round"
+        />
+        <circle cx="8" cy="8" r="1.6" stroke="currentColor" strokeWidth="1.2" />
+      </svg>
+    )
+  }
+  return (
+    <svg className={common} viewBox="0 0 16 16" fill="none" aria-hidden>
+      <circle cx="8" cy="8" r="5.2" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="8" cy="8" r="1.6" fill="currentColor" />
+    </svg>
+  )
+}
+
+export function ProfilesPage() {
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const advancedMode = useUIStore((s) => s.advancedMode)
+  const setActiveProfileId = useUIStore((s) => s.setActiveProfileId)
+  const [startFrom, setStartFrom] = useState<CreateStartFrom>('general')
+  const [showCreate, setShowCreate] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [detailsId, setDetailsId] = useState<string | null>(null)
+  const [filter, setFilter] = useState<ProfileFilter>('all')
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+
+  const profilesQuery = useQuery({
+    queryKey: ['profiles'],
+    queryFn: () => api.getProfiles(),
+    retry: false,
+  })
+
+  const modelsQuery = useQuery({
+    queryKey: ['models'],
+    queryFn: () => api.getModels(),
+    retry: false,
+  })
+
+  const nodesQuery = useQuery({
+    queryKey: ['nodes'],
+    queryFn: () => api.getNodes(),
+    retry: false,
+  })
+
+  useEffect(() => {
+    if (!menuOpenId) return
+    const close = () => setMenuOpenId(null)
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [menuOpenId])
+
+  const createMutation = useMutation({
+    mutationFn: () => {
+      if (startFrom === 'blank') {
+        return api.createProfile(blankProfileTemplate())
+      }
+      return api.createProfile(profileTemplateFromPurpose(startFrom))
+    },
+    onSuccess: (created) => {
+      queryClient.invalidateQueries({ queryKey: ['profiles'] })
+      setShowCreate(false)
+      if (created?.id) {
+        setEditingId(created.id)
+        setDetailsId(created.id)
+      }
+    },
+  })
+
+  const duplicateMutation = useMutation({
+    mutationFn: (profile: AIProfile) =>
+      api.createProfile({
+        name: `${profile.name} (copy)`,
+        purpose: profile.purpose,
+        orchestrator_id: profile.orchestrator_id,
+        node_policy: profile.node_policy,
+        roles: (profile.roles ?? []).map((r) => ({ ...r })),
+        tools: (profile.tools ?? []).map((t) => ({ ...t })),
+      }),
+    onSuccess: (created) => {
+      queryClient.invalidateQueries({ queryKey: ['profiles'] })
+      setMenuOpenId(null)
+      if (created?.id) {
+        setEditingId(created.id)
+        setDetailsId(created.id)
+      }
+    },
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: (profile: AIProfile) => api.updateProfile(profile.id, profile),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['profiles'] })
+      setEditingId(null)
+      setRenamingId(null)
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.deleteProfile(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['profiles'] })
+      setMenuOpenId(null)
+      setEditingId(null)
+      setDetailsId(null)
+    },
+  })
+
+  const allProfiles = sortProfilesForDisplay(profilesQuery.data ?? [])
+  const profiles = filterProfiles(allProfiles, filter)
+  const installedModels = (modelsQuery.data ?? []).filter(
+    (m) => m.installed || (m.installed_on?.length ?? 0) > 0,
+  )
+  const pairedNodes = (nodesQuery.data ?? []).filter((n) => n.is_local || n.paired)
+  const startOptions = createStartOptions()
+  const selectedStartMeta =
+    startOptions.find((option) => option.id === startFrom) ?? startOptions[0]
+
+  const useInChat = (profileId: string) => {
+    setActiveProfileId(profileId)
+    navigate(`/chat?profile=${encodeURIComponent(profileId)}&new=1`)
+  }
+
+  const beginRename = (profile: AIProfile) => {
+    setMenuOpenId(null)
+    setRenamingId(profile.id)
+    setRenameValue(profile.name)
+  }
+
+  const commitRename = (profile: AIProfile) => {
+    const next = renameValue.trim()
+    if (!next || next === profile.name) {
+      setRenamingId(null)
+      return
+    }
+    updateMutation.mutate({ ...profile, name: next })
+  }
+
+  return (
+    <div className="w-full min-w-0 space-y-6">
+      <header className="page-header flex flex-wrap items-end justify-between gap-4">
+        <div className="max-w-2xl">
+          <h1 className="page-title">Profiles</h1>
+          <p className="page-subtitle">
+            Profiles define how your AI works — its role, tools, models, and computers.
+          </p>
+          <p className="mt-1 text-sm text-ink-muted">
+            Choose one in Chat, or create your own.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={() => setShowCreate(true)}
+          title="Create a new profile"
+        >
+          Create profile
+        </button>
+      </header>
+
+      {showCreate && (
+        <section className="card space-y-4">
+          <div>
+            <h2 className="font-display text-lg font-semibold text-ink">Create profile</h2>
+            <p className="mt-1 text-sm text-ink-muted">Start from:</p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {startOptions.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => setStartFrom(option.id)}
+                className={[
+                  'selectable text-left',
+                  startFrom === option.id ? 'selectable-active' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                <p className="font-semibold text-ink">{option.title}</p>
+                <p className="mt-1 text-sm text-ink-muted">{option.description}</p>
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-ink-faint">
+            Starting with <span className="font-medium text-ink">{selectedStartMeta.title}</span>
+            . You can rename and fine-tune after creating.
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={createMutation.isPending}
+              onClick={() => createMutation.mutate()}
+            >
+              {createMutation.isPending ? 'Creating…' : 'Create'}
+            </button>
+            <button type="button" className="btn-secondary" onClick={() => setShowCreate(false)}>
+              Cancel
+            </button>
+          </div>
+        </section>
+      )}
+
+      {allProfiles.length > 0 && (
+        <div className="flex flex-wrap gap-2" role="tablist" aria-label="Filter profiles">
+          {(
+            [
+              { id: 'all', label: 'All' },
+              { id: 'builtin', label: 'Built-in' },
+              { id: 'custom', label: 'Custom' },
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={filter === tab.id}
+              className={[
+                'rounded-lg px-3 py-1.5 text-xs font-medium transition',
+                filter === tab.id
+                  ? 'bg-primary-soft text-primary-active'
+                  : 'text-ink-muted hover:bg-raised hover:text-ink',
+              ].join(' ')}
+              onClick={() => setFilter(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {profilesQuery.isLoading && <LoadingSpinner label="Loading profiles…" />}
+
+      {profilesQuery.isError && (
+        <div className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
+          Could not load profiles. Is the local daemon running?
+        </div>
+      )}
+
+      {!profilesQuery.isLoading && !profilesQuery.isError && allProfiles.length === 0 && (
+        <EmptyState
+          title="No profiles yet"
+          description="Create a profile to tell Chat how your assistant should work."
+          action={
+            <button type="button" className="btn-primary" onClick={() => setShowCreate(true)}>
+              Create profile
+            </button>
+          }
+        />
+      )}
+
+      {!profilesQuery.isLoading && allProfiles.length > 0 && profiles.length === 0 && (
+        <p className="text-sm text-ink-muted">No profiles in this filter.</p>
+      )}
+
+      {profiles.length > 0 && (
+        <ul className="grid gap-3 lg:grid-cols-2">
+          {profiles.map((profile) => {
+            const roles = profile.roles ?? []
+            const nodeMode = profile.node_policy?.mode ?? 'automatic'
+            const isEditing = editingId === profile.id
+            const showDetails = detailsId === profile.id || isEditing
+            const builtIn = isBuiltInProfile(profile.id)
+            const orch = orchestratorLabel(profile.orchestrator_id, advancedMode)
+            const computers = computerSelectionLabel(nodeMode)
+            const tools = toolSummary(profile.tools)
+            const chips = toolChipPreview(profile.tools)
+            const isTeam = profile.orchestrator_id === 'team'
+            const isRenaming = renamingId === profile.id
+
+            return (
+              <li
+                key={profile.id}
+                className={[
+                  'card space-y-3 transition',
+                  purposeAccentClass(profile.purpose),
+                ].join(' ')}
+              >
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg bg-primary-soft/60">
+                    <PurposeGlyph purpose={profile.purpose} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {isRenaming ? (
+                        <input
+                          className="field max-w-full py-1 text-sm font-semibold"
+                          value={renameValue}
+                          autoFocus
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          onBlur={() => commitRename(profile)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              commitRename(profile)
+                            }
+                            if (e.key === 'Escape') {
+                              setRenamingId(null)
+                            }
+                          }}
+                          aria-label="Rename profile"
+                        />
+                      ) : (
+                        <h2 className="font-semibold text-ink">{profile.name}</h2>
+                      )}
+                      <span className="label-caps">
+                        {builtIn ? 'Built-in' : 'Custom'}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-sm text-ink-muted">
+                      {PURPOSE_LABELS[profile.purpose] ?? profile.purpose}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 text-sm">
+                  <p className="font-medium text-ink">{orch.title.split(' · ')[0]}</p>
+                  <p className="text-ink-muted">
+                    {computers.short === 'Automatic'
+                      ? 'Automatic computer selection'
+                      : computers.short === 'Custom'
+                        ? 'Custom computer selection'
+                        : computers.title}
+                  </p>
+                  {tools.enabled > 0 ? (
+                    <p className="text-ink-muted">
+                      {tools.enabled} tools
+                      {tools.ask > 0 ? ` · ${tools.ask} ask first` : ''}
+                    </p>
+                  ) : (
+                    <p className="text-ink-muted">No tools enabled</p>
+                  )}
+                  {chips.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                      {chips.map((chip) => (
+                        <span
+                          key={chip.label}
+                          className={[
+                            'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
+                            chip.tone === 'ok'
+                              ? 'bg-raised text-ink'
+                              : chip.tone === 'ask'
+                                ? 'bg-warning/15 text-ink'
+                                : 'bg-raised text-ink-faint line-through',
+                          ].join(' ')}
+                        >
+                          {chip.label}
+                        </span>
+                      ))}
+                      {(() => {
+                        const previewed = 3
+                        const remaining = Math.max(0, tools.enabled - previewed)
+                        return remaining > 0 ? (
+                          <span className="rounded-md px-1.5 py-0.5 text-[11px] text-ink-faint">
+                            +{remaining} more
+                          </span>
+                        ) : null
+                      })()}
+                    </div>
+                  )}
+                </div>
+
+                {roles.length > 0 && (
+                  <div className="pt-0.5">
+                    {isTeam && roles.length > 1 ? (
+                      <p className="text-sm font-medium text-ink">
+                        {roles.map((r) => roleDisplayName(r.role)).join(' → ')}
+                      </p>
+                    ) : (
+                      <p className="text-sm font-medium capitalize text-ink">
+                        {roleDisplayName(roles[0]?.role ?? 'assistant')}
+                      </p>
+                    )}
+                    {showDetails && (
+                      <ul className="mt-2 space-y-1.5">
+                        {roles.map((r) => (
+                          <li key={r.role} className="rounded-lg bg-raised/70 px-2.5 py-1.5">
+                            <p className="text-xs font-medium capitalize text-ink">
+                              {roleDisplayName(r.role)}
+                            </p>
+                            <p className="text-[11px] text-ink-muted">{roleHint(r)}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    className="btn-primary px-3 py-1.5 text-xs"
+                    onClick={() => useInChat(profile.id)}
+                  >
+                    Use in Chat
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary px-3 py-1.5 text-xs"
+                    onClick={() => {
+                      if (advancedMode) {
+                        setEditingId(isEditing ? null : profile.id)
+                        setDetailsId(profile.id)
+                      } else {
+                        setDetailsId(showDetails && !isEditing ? null : profile.id)
+                        setEditingId(null)
+                      }
+                    }}
+                  >
+                    {advancedMode
+                      ? isEditing
+                        ? 'Close'
+                        : 'Edit'
+                      : showDetails
+                        ? 'Hide details'
+                        : 'Details'}
+                  </button>
+                  <div className="relative ml-auto">
+                    <button
+                      type="button"
+                      className="rounded-md px-2 py-1.5 text-xs text-ink-faint hover:bg-raised hover:text-ink"
+                      aria-label={`More actions for ${profile.name}`}
+                      aria-expanded={menuOpenId === profile.id}
+                      onClick={(e: MouseEvent) => {
+                        e.stopPropagation()
+                        setMenuOpenId((id) => (id === profile.id ? null : profile.id))
+                      }}
+                    >
+                      ···
+                    </button>
+                    {menuOpenId === profile.id && (
+                      <div
+                        className="absolute right-0 top-full z-20 mt-1 min-w-[9.5rem] rounded-lg border border-line bg-surface py-1 shadow-panel"
+                        role="menu"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <MenuItem
+                          onClick={() => {
+                            setMenuOpenId(null)
+                            duplicateMutation.mutate(profile)
+                          }}
+                          disabled={duplicateMutation.isPending}
+                        >
+                          Duplicate
+                        </MenuItem>
+                        <MenuItem onClick={() => beginRename(profile)}>Rename</MenuItem>
+                        {!builtIn && (
+                          <MenuItem
+                            danger
+                            disabled={deleteMutation.isPending}
+                            onClick={() => {
+                              if (
+                                window.confirm(
+                                  `Delete “${profile.name}”? This cannot be undone.`,
+                                )
+                              ) {
+                                deleteMutation.mutate(profile.id)
+                              } else {
+                                setMenuOpenId(null)
+                              }
+                            }}
+                          >
+                            Delete
+                          </MenuItem>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {showDetails && !isEditing && (
+                  <div className="space-y-3 border-t border-line pt-3 text-sm">
+                    <DetailBlock label="How it works" body={orch.detail} />
+                    <DetailBlock
+                      label="Computer selection"
+                      body={`${computers.title}. ${computers.detail}`}
+                    />
+                    {advancedMode && (
+                      <p className="text-xs text-ink-faint">
+                        Orchestrator:{' '}
+                        <span className="font-medium text-ink">
+                          {profile.orchestrator_id === 'team' ? 'Team' : 'Simple'}
+                        </span>
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {advancedMode && isEditing && (
+                  <AdvancedEditor
+                    profile={profile}
+                    installedModels={installedModels.map((m) => ({
+                      id: m.id,
+                      name: m.display_name || m.id,
+                    }))}
+                    nodes={pairedNodes.map((n) => ({
+                      id: n.id,
+                      name: n.is_local ? `${n.name} (this machine)` : n.name,
+                    }))}
+                    saving={updateMutation.isPending}
+                    onSave={(next) => updateMutation.mutate(next)}
+                    onCancel={() => setEditingId(null)}
+                  />
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function purposeAccentClass(purpose: string): string {
+  switch (purpose) {
+    case 'coding':
+      return 'border-l-[3px] border-l-primary/50'
+    case 'research':
+      return 'border-l-[3px] border-l-mimir/45'
+    case 'custom':
+      return 'border-l-[3px] border-l-ink-faint/40'
+    default:
+      return 'border-l-[3px] border-l-accent/40'
+  }
+}
+
+function DetailBlock({ label, body }: { label: string; body: string }) {
+  return (
+    <div>
+      <p className="text-xs font-medium uppercase tracking-wide text-ink-faint">{label}</p>
+      <p className="mt-1 text-sm leading-relaxed text-ink-muted">{body}</p>
+    </div>
+  )
+}
+
+function MenuItem({
+  children,
+  onClick,
+  disabled,
+  danger,
+}: {
+  children: ReactNode
+  onClick: () => void
+  disabled?: boolean
+  danger?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      disabled={disabled}
+      className={[
+        'block w-full px-3 py-1.5 text-left text-sm hover:bg-raised disabled:opacity-50',
+        danger ? 'text-danger hover:bg-danger/10' : 'text-ink',
+      ].join(' ')}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  )
+}
+
+function AdvancedEditor({
+  profile,
+  installedModels,
+  nodes,
+  saving,
+  onSave,
+  onCancel,
+}: {
+  profile: AIProfile
+  installedModels: { id: string; name: string }[]
+  nodes: { id: string; name: string }[]
+  saving: boolean
+  onSave: (profile: AIProfile) => void
+  onCancel: () => void
+}) {
+  const [name, setName] = useState(profile.name)
+  const [orchestratorId, setOrchestratorId] = useState(profile.orchestrator_id)
+  const [nodeMode, setNodeMode] = useState(profile.node_policy?.mode ?? 'automatic')
+  const [roles, setRoles] = useState<ModelRole[]>(
+    (profile.roles?.length ?? 0) > 0
+      ? profile.roles.map((r) => ({ ...r }))
+      : [{ role: 'assistant', model_id: '', required: true }],
+  )
+  const [tools, setTools] = useState<ToolPolicy[]>(defaultToolsFrom(profile))
+  const advancedMode = useUIStore((s) => s.advancedMode)
+  const profileIdRef = useRef(profile.id)
+
+  useEffect(() => {
+    if (profileIdRef.current === profile.id) return
+    profileIdRef.current = profile.id
+    setName(profile.name)
+    setOrchestratorId(profile.orchestrator_id)
+    setNodeMode(profile.node_policy?.mode ?? 'automatic')
+    setRoles(
+      (profile.roles?.length ?? 0) > 0
+        ? profile.roles.map((r) => ({ ...r }))
+        : [{ role: 'assistant', model_id: '', required: true }],
+    )
+    setTools(defaultToolsFrom(profile))
+  }, [profile])
+
+  const updateRole = (index: number, patch: Partial<ModelRole>) => {
+    setRoles((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)))
+  }
+
+  const updateToolPolicy = (toolId: string, policy: ToolPolicy['policy']) => {
+    setTools((prev) =>
+      prev.map((t) => (t.tool_id === toolId ? { ...t, policy } : t)),
+    )
+  }
+
+  const orchHint =
+    orchestratorId === 'team'
+      ? 'AI team runs three steps and can spread them across paired computers.'
+      : 'Single assistant is one turn. It can request local tools when the model needs them.'
+
+  const nodeHint = computerSelectionLabel(nodeMode).detail
+
+  return (
+    <div className="space-y-5 border-t border-line pt-4">
+      <section className="space-y-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+          Identity
+        </h3>
+        <label className="block text-xs text-ink-muted">
+          Name
+          <input
+            className="field mt-1 w-full py-1.5 text-sm"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Programming"
+          />
+        </label>
+      </section>
+
+      <section className="space-y-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+          How it works
+        </h3>
+        <label className="block text-xs text-ink-muted">
+          Orchestrator
+          <select
+            className="field mt-1 w-full py-1.5 text-sm"
+            value={orchestratorId}
+            onChange={(e) => setOrchestratorId(e.target.value)}
+          >
+            <option value="simple">Simple — single assistant</option>
+            <option value="team">Team — coordinator → worker → reviewer</option>
+          </select>
+        </label>
+        <p className="text-xs leading-relaxed text-ink-faint">{orchHint}</p>
+        <label className="block text-xs text-ink-muted">
+          Computer selection
+          <select
+            className="field mt-1 w-full py-1.5 text-sm"
+            value={nodeMode}
+            onChange={(e) =>
+              setNodeMode(e.target.value as AIProfile['node_policy']['mode'])
+            }
+          >
+            <option value="automatic">Automatic — place where the model already lives</option>
+            <option value="prefer_local">Prefer this computer</option>
+            <option value="manual">Custom — rely on role pins below</option>
+          </select>
+        </label>
+        <p className="text-xs leading-relaxed text-ink-faint">{nodeHint}</p>
+      </section>
+
+      <section className="space-y-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+          Roles
+        </h3>
+        {roles.map((role, index) => (
+          <div
+            key={`${profile.id}-${role.role}-${index}`}
+            className="space-y-2 rounded-lg bg-raised px-3 py-3"
+          >
+            <p className="text-xs leading-relaxed text-ink-muted">{roleHelp(role.role)}</p>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <label className="text-xs text-ink-muted">
+                Role
+                <input
+                  className="field mt-1 w-full py-1.5 text-sm"
+                  value={role.role}
+                  onChange={(e) => updateRole(index, { role: e.target.value })}
+                />
+              </label>
+              <label className="text-xs text-ink-muted">
+                Model
+                <select
+                  className="field mt-1 w-full py-1.5 text-sm"
+                  value={role.model_id}
+                  onChange={(e) => updateRole(index, { model_id: e.target.value })}
+                >
+                  <option value="">Automatic / Chat pick</option>
+                  {installedModels.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name || m.id}
+                    </option>
+                  ))}
+                  {role.model_id && !installedModels.some((m) => m.id === role.model_id) && (
+                    <option value={role.model_id}>{role.model_id}</option>
+                  )}
+                </select>
+              </label>
+              <label className="text-xs text-ink-muted">
+                Computer
+                <select
+                  className="field mt-1 w-full py-1.5 text-sm"
+                  value={role.node_id ?? ''}
+                  onChange={(e) =>
+                    updateRole(index, { node_id: e.target.value || undefined })
+                  }
+                >
+                  <option value="">Automatic</option>
+                  {nodes.map((n) => (
+                    <option key={n.id} value={n.id}>
+                      {n.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </div>
+        ))}
+      </section>
+
+      <section className="space-y-3">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Capabilities</h3>
+        <ul className="space-y-2">
+          {CAPABILITIES.map((capability) => {
+            const on = capabilityEnabled(tools, capability.id)
+            return (
+              <li key={capability.id} className="flex items-start justify-between gap-3 rounded-lg bg-raised px-3 py-3">
+                <div>
+                  <p className="text-sm font-medium text-ink">{capability.label}</p>
+                  <p className="mt-1 text-xs leading-relaxed text-ink-muted">{capability.description}</p>
+                </div>
+                <button
+                  type="button"
+                  className={on ? 'btn-primary px-3 py-1.5 text-xs' : 'btn-secondary px-3 py-1.5 text-xs'}
+                  aria-pressed={on}
+                  onClick={() => setTools((current) => setCapability(current, capability.id, !on))}
+                >
+                  {on ? 'On' : 'Off'}
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      </section>
+
+      {advancedMode && (
+      <section className="space-y-3">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+          Individual tools
+        </h3>
+        <ul className="space-y-2">
+          {TOOL_CATALOG.map((tool) => {
+            const policy = tools.find((t) => t.tool_id === tool.id)?.policy ?? 'ask'
+            const policyMeta =
+              POLICY_OPTIONS.find((opt) => opt.value === policy) ?? POLICY_OPTIONS[1]
+            return (
+              <li key={tool.id} className="rounded-lg bg-raised px-3 py-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-ink">{tool.label}</p>
+                    <p className="mt-1 text-xs leading-relaxed text-ink-muted">
+                      {tool.description}
+                    </p>
+                  </div>
+                  <select
+                    className="field max-w-[200px] py-1 text-sm"
+                    value={policy}
+                    title={policyMeta.description}
+                    onChange={(e) =>
+                      updateToolPolicy(tool.id, e.target.value as ToolPolicy['policy'])
+                    }
+                  >
+                    {POLICY_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value} title={opt.description}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      </section>
+      )}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          className="btn-primary px-3 py-1.5 text-xs"
+          disabled={saving || !name.trim()}
+          onClick={() =>
+            onSave({
+              ...profile,
+              name: name.trim(),
+              orchestrator_id: orchestratorId,
+              node_policy: { mode: nodeMode },
+              roles,
+              tools,
+            })
+          }
+        >
+          Save profile
+        </button>
+        <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}

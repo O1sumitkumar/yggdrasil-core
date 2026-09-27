@@ -1,0 +1,5 @@
+{
+  "name": "yggdrasil-core",
+  "private": true,
+  "packageManager": "pnpm@9.15.0"
+}
