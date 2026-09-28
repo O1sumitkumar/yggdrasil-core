@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   release:
@@ -49,20 +50,35 @@ jobs:
             dist/*.rpm
             dist/*.tar.gz
             dist/SHA256SUMS.txt
-      - name: Commit the Homebrew formula
+      - name: Open the Homebrew formula pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           cp Formula/yggdrasil.rb /tmp/yggdrasil.rb
-          rm -f Formula/yggdrasil.rb
+          cp -a dist/apt /tmp/ygg-apt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git fetch origin main
-          git checkout -B main origin/main
+          git checkout -B formula origin/main
           mkdir -p Formula
           cp /tmp/yggdrasil.rb Formula/yggdrasil.rb
           git add Formula/yggdrasil.rb
-          git commit -m "Publish the Homebrew formula for ${GITHUB_REF_NAME#v}."
-          git push origin HEAD:main
+          if git diff --cached --quiet; then
+            echo "Homebrew formula matches main"
+          else
+            git commit -m "Publish the Homebrew formula for ${GITHUB_REF_NAME#v}."
+            # formula is a release branch. main requires a pull request, so this ref is replaced each release.
+            git push --force origin HEAD:formula
+            if ! gh pr view formula --json url --jq .url >/dev/null 2>&1; then
+              gh pr create --base main --head formula \
+                --title "Publish the Homebrew formula for ${GITHUB_REF_NAME#v}" \
+                --body "Updates Formula/yggdrasil.rb from the ${GITHUB_REF_NAME} release."
+            fi
+          fi
+          rm -rf dist/apt
+          mkdir -p dist
+          cp -a /tmp/ygg-apt dist/apt
       - name: Publish the apt repository
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
