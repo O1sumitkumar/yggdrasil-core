@@ -1,0 +1,11 @@
+# Standard golangci-lint checks: errcheck, govet, ineffassign, staticcheck, unused.
+# std-error-handling ignores unchecked Close, Flush, and print calls.
+# User-facing error sentences keep their periods and carry a staticcheck nolint.
+version: "2"
+run:
+  timeout: 5m
+linters:
+  default: standard
+  exclusions:
+    presets:
+      - std-error-handling

@@ -157,7 +157,7 @@ func (d *Downloader) Download(ctx context.Context, entry CatalogEntry) error {
 	}
 
 	buf := make([]byte, 32*1024)
-	var downloaded uint64 = uint64(offset)
+	downloaded := uint64(offset)
 	lastEmit := time.Now()
 
 	for {

@@ -1,4 +1,4 @@
-.PHONY: all tidy test vet fmt frontend daemon ci test-cluster package-headless run-daemon run-web screenshots
+.PHONY: all tidy test vet fmt lint frontend daemon ci test-cluster package-headless run-daemon run-web screenshots
 
 all: tidy test frontend
 
@@ -14,6 +14,10 @@ fmt:
 
 vet:
 	go vet ./...
+
+lint:
+	golangci-lint run ./...
+	cd web && pnpm lint
 
 test:
 	go test ./...
@@ -39,7 +43,7 @@ package-headless:
 	chmod +x scripts/build/package-headless.sh
 	./scripts/build/package-headless.sh
 
-ci: fmt vet test frontend
+ci: fmt lint vet test frontend
 
 screenshots:
 	chmod +x scripts/capture-screenshots.sh

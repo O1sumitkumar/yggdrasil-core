@@ -276,8 +276,8 @@ func (c *Client) postJSON(ctx context.Context, path string, body []byte, out any
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(b))
 	}
 	if out == nil {
-		io.Copy(io.Discard, resp.Body)
-		return nil
+		_, err := io.Copy(io.Discard, resp.Body)
+		return err
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
 }

@@ -267,7 +267,7 @@ export function DiagnosticsPage() {
     })
 
     let runtimeTone: RowTone = 'ok'
-    let runtimeDetail = 'Healthy'
+    let runtimeDetail: string
     let runtimeMessage: string | undefined
     let runtimeActions: StatusAction[] | undefined
     if (!serviceOk) {

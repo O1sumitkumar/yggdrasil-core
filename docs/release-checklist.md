@@ -4,7 +4,7 @@ Use this before tagging `v*`. The tag push runs [`.github/workflows/release.yml`
 
 - [ ] Version passed into the release build matches the tag (`scripts/build/package-core-release.sh` strips a leading `v` in CI).
 - [ ] [CHANGELOG.md](../CHANGELOG.md) has an entry for the release, moved out of Unreleased.
-- [ ] CI is green on the commit being tagged, including `gofmt`, `go vet`, `go test`, the web build, and the cross-compile job.
+- [ ] CI is green on the commit being tagged, including `gofmt`, `go vet`, golangci-lint, `go test`, web lint, the web build, and the cross-compile job.
 - [ ] `govulncheck` from the security workflow is green. `pnpm audit` is informational today because that step does not fail the job. Read its output.
 - [ ] Linux amd64, Linux arm64, macOS amd64, macOS arm64, and Windows amd64 archives or packages built.
 - [ ] Docs that describe user-facing behavior match the build. Guide snapshot process is in [user-guide/README.md](user-guide/README.md).

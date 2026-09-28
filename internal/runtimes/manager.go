@@ -47,12 +47,13 @@ func (m *Manager) List(ctx context.Context) ([]RuntimeInfo, error) {
 	var out []RuntimeInfo
 	for _, rt := range m.registry.List() {
 		det, err := rt.Detect(ctx)
-		status := "unknown"
-		if err != nil {
+		var status string
+		switch {
+		case err != nil:
 			status = "error"
-		} else if det.Installed {
+		case det.Installed:
 			status = "installed"
-		} else {
+		default:
 			status = "not_installed"
 		}
 		out = append(out, RuntimeInfo{

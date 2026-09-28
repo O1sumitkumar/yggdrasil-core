@@ -291,7 +291,7 @@ export function ProfilesPage() {
   const selectedStartMeta =
     startOptions.find((option) => option.id === startFrom) ?? startOptions[0]
 
-  const useInChat = (profileId: string) => {
+  const openProfileInChat = (profileId: string) => {
     setActiveProfileId(profileId)
     navigate(`/chat?profile=${encodeURIComponent(profileId)}&new=1`)
   }
@@ -566,7 +566,7 @@ export function ProfilesPage() {
                   <button
                     type="button"
                     className="btn-primary px-3 py-1.5 text-xs"
-                    onClick={() => useInChat(profile.id)}
+                    onClick={() => openProfileInChat(profile.id)}
                   >
                     Use in Chat
                   </button>

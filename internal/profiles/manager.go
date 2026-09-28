@@ -140,7 +140,7 @@ func (m *Manager) Get(ctx context.Context, id string) (Profile, error) {
 	row := m.db.QueryRowContext(ctx, `
 		SELECT id, name, purpose, orchestrator_id, node_policy_json, tools_json
 		FROM profiles WHERE id = ?`, id)
-	p, err := scanProfileRow(row)
+	p, err := scanProfile(row)
 	if err == sql.ErrNoRows {
 		return Profile{}, fmt.Errorf("profile %q not found", id)
 	}
@@ -165,7 +165,7 @@ func (m *Manager) Create(ctx context.Context, p Profile) (Profile, error) {
 	if err != nil {
 		return Profile{}, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO profiles (id, name, purpose, orchestrator_id, node_policy_json, tools_json)
 		VALUES (?, ?, ?, ?, ?, ?)`,
@@ -192,7 +192,7 @@ func (m *Manager) Update(ctx context.Context, p Profile) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	res, err := tx.ExecContext(ctx, `
 		UPDATE profiles SET name=?, purpose=?, orchestrator_id=?, node_policy_json=?, tools_json=?, updated_at=datetime('now')
 		WHERE id=?`,
@@ -299,17 +299,7 @@ type scannable interface {
 	Scan(dest ...any) error
 }
 
-func scanProfile(rows *sql.Rows) (Profile, error) {
-	var p Profile
-	var nodePolicyJSON, toolsJSON string
-	if err := rows.Scan(&p.ID, &p.Name, &p.Purpose, &p.OrchestratorID, &nodePolicyJSON, &toolsJSON); err != nil {
-		return Profile{}, err
-	}
-	decodeProfileMeta(&p, nodePolicyJSON, toolsJSON)
-	return p, nil
-}
-
-func scanProfileRow(row *sql.Row) (Profile, error) {
+func scanProfile(row scannable) (Profile, error) {
 	var p Profile
 	var nodePolicyJSON, toolsJSON string
 	if err := row.Scan(&p.ID, &p.Name, &p.Purpose, &p.OrchestratorID, &nodePolicyJSON, &toolsJSON); err != nil {

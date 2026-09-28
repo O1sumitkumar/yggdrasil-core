@@ -403,7 +403,7 @@ func (a *App) findPairedNode(ctx context.Context, nodeID string) (contracts.Node
 				return contracts.Node{}, fmt.Errorf("%s is not paired", nodeDisplayName(n))
 			}
 			if n.Address == "" {
-				return contracts.Node{}, fmt.Errorf(
+				return contracts.Node{}, fmt.Errorf( //nolint:staticcheck // ST1005: sentence shown in the UI
 					"%s is offline or has no network address yet. Tap Refresh on Computers, or set the role to Automatic placement.",
 					nodeDisplayName(n),
 				)

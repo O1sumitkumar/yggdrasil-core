@@ -223,25 +223,6 @@ func platformAssetSuffix() string {
 	}
 }
 
-func extractZipBinary(archivePath, outPath, binName string) error {
-	zr, err := zip.OpenReader(archivePath)
-	if err != nil {
-		return err
-	}
-	defer zr.Close()
-	for _, f := range zr.File {
-		if filepath.Base(f.Name) == binName || strings.HasSuffix(f.Name, "/"+binName) {
-			rc, err := f.Open()
-			if err != nil {
-				return err
-			}
-			defer rc.Close()
-			return writeExecutable(outPath, rc)
-		}
-	}
-	return fmt.Errorf("%s not found in zip", binName)
-}
-
 func extractZipAll(archivePath, destDir string) error {
 	zr, err := zip.OpenReader(archivePath)
 	if err != nil {
@@ -275,33 +256,6 @@ func extractZipAll(archivePath, destDir string) error {
 	return nil
 }
 
-func extractTarGzBinary(archivePath, outPath, binName string) error {
-	f, err := os.Open(archivePath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return err
-	}
-	defer gz.Close()
-	tr := tar.NewReader(gz)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
-		if filepath.Base(hdr.Name) == binName {
-			return writeExecutable(outPath, tr)
-		}
-	}
-	return fmt.Errorf("%s not found in tar.gz", binName)
-}
-
 func extractTarGzAll(archivePath, destDir string) error {
 	f, err := os.Open(archivePath)
 	if err != nil {
@@ -331,7 +285,7 @@ func extractTarGzAll(archivePath, destDir string) error {
 			if err := os.MkdirAll(target, 0o755); err != nil {
 				return err
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg, 'A': // tar.TypeRegA, still a regular file
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return err
 			}
@@ -422,16 +376,6 @@ func flattenRuntimeDir(srcDir, destDir string) error {
 		}
 	}
 	return nil
-}
-
-func writeExecutable(path string, r io.Reader) error {
-	out, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	_, err = io.Copy(out, r)
-	return err
 }
 
 func readVersion(path string) string {

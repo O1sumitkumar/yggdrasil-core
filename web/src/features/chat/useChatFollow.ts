@@ -96,6 +96,8 @@ export function useChatFollow(conversationId: string | null) {
       const wasAnimating = ignoreScrollRef.current
       ignoreScrollRef.current = false
       if (wasAnimating && el) {
+        // Reassigning scrollTop cancels an in-progress smooth scroll.
+        // eslint-disable-next-line no-self-assign
         el.scrollTop = el.scrollTop
       }
       if (el) applyStick(shouldFollowScroll(distanceFromBottom(el)))

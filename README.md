@@ -1,28 +1,83 @@
 # Yggdrasil Core
 
-Headless local-AI orchestration for the computers you already own.
+**Turn the computers you already own into a local AI team.**
 
-Yggdrasil Core runs on a machine, manages local inference runtimes and models, and can pair with other computers on the same network. Clients talk to it over HTTP, including an OpenAI-compatible API.
+Yggdrasil Core is an open-source control plane for local AI. It manages models and runtimes, discovers other computers on your network, places workloads where they fit, and exposes an OpenAI-compatible API.
 
-**Status:** Beta. The latest tag in this repository is `v1.2.0-beta.3`. A build from source reports `0.1.0-dev` unless the version is set with `-ldflags`.
+Headless local-AI orchestration for the computers you already own. Run it on one machine, or pair several together.
 
-**Platforms:** macOS, Windows, and Linux. Packaged releases today are macOS headless archives and Linux `.deb` / `.rpm` packages. See [Supported platforms](#supported-platforms).
+It is the daemon (`yggdrasil-daemon`), the local web UI that daemon serves, and the HTTP API in front of local models. Yggdrasil Desktop and Yggdrasil Mobile are separate clients, developed outside this repository.
 
-**Site:** [yggdrasil.yeix.io](https://yggdrasil.yeix.io) — Yggdrasil Desktop, this Core project, documentation, and Core downloads.
+**Status:** Beta. See the latest [GitHub Release](https://github.com/yeixio/yggdrasil-core/releases).
 
-**Start here:** [Quick start](#quick-start) · [Documentation](#documentation)
+[Quick start](#quick-start) · [Documentation](#documentation) · [Roadmap](ROADMAP.md) · [Contributing](CONTRIBUTING.md)
 
-Copyright (C) 2026 YEIXIO LLC. Source code is [AGPL-3.0-or-later](LICENSE). Trademarks are not included; see [TRADEMARKS.md](TRADEMARKS.md).
+[![CI](https://github.com/yeixio/yggdrasil-core/actions/workflows/ci.yml/badge.svg)](https://github.com/yeixio/yggdrasil-core/actions/workflows/ci.yml)
+[![Security](https://github.com/yeixio/yggdrasil-core/actions/workflows/security.yml/badge.svg)](https://github.com/yeixio/yggdrasil-core/actions/workflows/security.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fyeixio%2Fyggdrasil-core%2Fcoverage%2Fcoverage.json)](https://github.com/yeixio/yggdrasil-core/actions/workflows/ci.yml)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 
-## What is Yggdrasil Core?
+<p align="center">
+  <a href="docs/screenshots/demo.mp4">
+    <img src="docs/screenshots/demo.gif" alt="Walkthrough of chat, models, computers, performance, diagnostics, and API access" width="850">
+  </a>
+</p>
 
-Yggdrasil Core is infrastructure. It is the daemon (`yggdrasil-daemon`), a local web UI served by that daemon, and the HTTP API in front of local models.
+**One daemon. Multiple computers. Local models. One API.**
 
-It is not a hosted chat product. Yggdrasil Desktop and Yggdrasil Mobile are separate clients and are not developed in this repository.
+## Quick start
+
+Open `http://127.0.0.1:7331` after the daemon is running. The API listens on `127.0.0.1:7331`. The first page can install a runtime and a GGUF model.
+
+### macOS
+
+Homebrew installs the Core daemon from this repository. Yggdrasil Desktop is a separate product. The Homebrew cask named `yggdrasil` is a different project.
+
+```bash
+brew tap yeixio/yggdrasil https://github.com/yeixio/yggdrasil-core
+brew install yeixio/yggdrasil/yggdrasil
+yggdrasil-daemon
+```
+
+A tagged release writes `Formula/yggdrasil.rb` and merges it to `main`. Headless archives are also attached to [GitHub Releases](https://github.com/yeixio/yggdrasil-core/releases). See [packaging/release-install.md](packaging/release-install.md).
+
+### Linux
+
+Debian and Ubuntu use the apt repository on the `apt` branch. That repository is unsigned.
+
+```bash
+echo "deb [trusted=yes] https://raw.githubusercontent.com/yeixio/yggdrasil-core/apt stable main" | sudo tee /etc/apt/sources.list.d/yggdrasil.list
+sudo apt-get update
+sudo apt-get install yggdrasil
+```
+
+The package installs `yggdrasil-daemon`, `yggctl`, the web UI, and `yggdrasil.service`. RPM packages for x86_64 and aarch64 are on the GitHub Release. Install one with `sudo rpm -i` or `sudo dnf install`. Details are in [packaging/linux/README.md](packaging/linux/README.md).
+
+### Windows
+
+Windows amd64 builds from source today. The next tagged release attaches an unsigned `yggdrasil-<version>-windows-amd64-headless.tar.gz`.
+
+### Build from source
+
+Go 1.26.3 or newer, Node.js 22, and pnpm 9.
+
+```bash
+git clone https://github.com/yeixio/yggdrasil-core.git
+cd yggdrasil-core
+make frontend
+make daemon
+./bin/yggdrasil-daemon
+```
+
+`make frontend` installs web dependencies, runs the web tests, and writes `web/dist`. The daemon serves that directory when it finds `index.html` there. A build from this tree reports `0.1.0-dev` unless the version is set with `-ldflags`. See [docs/development.md](docs/development.md).
+
+Dockerfiles in this repository are for development and the cluster check. Release archives are the packaged builds.
 
 ## Why Yggdrasil?
 
-Local models are tied to the runtime and the computer that can hold them. Yggdrasil Core keeps that work on machines you control:
+Running one local model is straightforward. Managing models, runtimes, hardware, and several computers as one environment takes a control plane.
+
+Yggdrasil Core sits between your applications and the machines running your models:
 
 - it detects CPU, memory, disk, and accelerators on the host
 - it installs GGUF models and a managed llama.cpp runtime
@@ -44,51 +99,11 @@ These exist in this repository today:
 - health endpoint, model health checks, diagnostics bundle, and a local event stream
 - benchmarks against a running local model
 - OpenAI-compatible `GET /v1/models` and `POST /v1/chat/completions`
-- tools for web search, files, shell, and git, each gated by a profile policy
+- tools for web search, files, shell, and Git, with explicit per-profile permission policies
 
-Background work that exists today is operational: idle model unload, model health checks, and periodic peer refresh. There is no user-facing job scheduler.
-
-## Quick start
-
-Requirements for a source build: Go 1.26.3 or newer, Node.js 22, and pnpm 9.
-
-```bash
-git clone https://github.com/yeixio/yggdrasil-core.git
-cd yggdrasil-core
-make frontend
-make daemon
-./bin/yggdrasil-daemon
-```
-
-Open `http://127.0.0.1:7331`. The API listens on `127.0.0.1:7331` by default. The first page can install a runtime and a GGUF model. After a model is running, the examples under [examples/](examples/) call `/v1/chat/completions`.
-
-`make frontend` installs web dependencies, runs the web tests, and writes `web/dist`. The daemon serves that directory when it finds `index.html` there.
-
-### Published packages
-
-Tagged releases attach macOS headless archives, Linux `.deb` and `.rpm` packages, and `SHA256SUMS.txt`. See [GitHub Releases](https://github.com/yeixio/yggdrasil-core/releases) and [packaging/release-install.md](packaging/release-install.md).
-
-macOS can install Core with Homebrew. This tap is the Core daemon, not Yggdrasil Desktop, and not the separate Homebrew cask named `yggdrasil`.
-
-```bash
-brew tap yeixio/yggdrasil https://github.com/yeixio/yggdrasil-core
-brew install yeixio/yggdrasil/yggdrasil
-yggdrasil-daemon
-```
-
-Open `http://127.0.0.1:7331`. A tagged release writes `Formula/yggdrasil.rb` and merges it to `main`.
-
-The same workflow publishes an apt repository on the `apt` branch. Debian and Ubuntu instructions are in [packaging/linux/README.md](packaging/linux/README.md).
-
-The next tagged release also builds `yggdrasil-<version>-windows-amd64-headless.tar.gz`. Releases cut before that change do not include it. Windows can be built from source today. Core release archives are not code-signed.
-
-Dockerfiles in this repository are for development and the cluster check. There is no published application image.
+Background work today is idle model unload, model health checks, and periodic peer refresh. A user-facing scheduler is a [planned design](docs/features/scheduler-and-automations.md).
 
 ## The interface
-
-The daemon serves this web UI at `http://127.0.0.1:7331`. `make screenshots` recaptures the images and the walkthrough below from demo data. It does not start a model.
-
-[![Walkthrough of chat, models, computers, performance, diagnostics, and API access](docs/screenshots/demo.gif)](docs/screenshots/demo.mp4)
 
 | | |
 | --- | --- |
@@ -99,23 +114,30 @@ The daemon serves this web UI at `http://127.0.0.1:7331`. `make screenshots` rec
 | <img src="docs/screenshots/05-diagnostics.png" alt="Diagnostics showing the local service is healthy" width="420"> | <img src="docs/screenshots/06-api-manager.png" alt="Local API access and API keys" width="420"> |
 | Diagnostics | API access |
 
-## Multi-computer architecture
+`make screenshots` recaptures these stills and the walkthrough from demo data. It does not start a model.
 
-Each computer runs its own daemon.
+## How it works
+
+Each computer runs its own daemon. Norn places a role on a machine that can run it. Bifrost discovers and pairs computers on the LAN.
 
 ```text
-client
-  |
-HTTP  (127.0.0.1:7331 by default)
-  |
-yggdrasil-daemon
-  |
-runtime adapters
-  |
-local inference (llama.cpp, or a configured external server)
+Apps / IDEs / Agents
+        │
+        ▼
+  Yggdrasil Core
+   ┌────┴────┐
+   │  Norn   │ workload placement
+   │ Bifrost │ discovery and pairing
+   └────┬────┘
+        │
+   ┌────┴───────────────┐
+   ▼                    ▼
+This computer      Paired computers
+   │                    │
+   └──── local models ──┘
 ```
 
-On the network, Bifrost is the node protocol (port 7332). Discovery uses mDNS (`_localai._tcp`) and can use static peers when mDNS is unavailable. Pairing exchanges a consent step and then authenticates later node calls with certificates. Norn chooses which paired computer runs a role. Details are in [docs/architecture.md](docs/architecture.md) and [docs/clustering.md](docs/clustering.md). A manual two-machine check is in [docs/two-machine-team-demo.md](docs/two-machine-team-demo.md).
+The API defaults to `127.0.0.1:7331`. Bifrost uses port 7332. Discovery uses mDNS (`_localai._tcp`) and can use static peers when mDNS is unavailable. Pairing asks for consent, then later node calls use certificates. Layout and the two-machine check are in [docs/architecture.md](docs/architecture.md), [docs/clustering.md](docs/clustering.md), and [docs/two-machine-team-demo.md](docs/two-machine-team-demo.md).
 
 ## OpenAI-compatible API
 
@@ -133,19 +155,19 @@ curl http://127.0.0.1:7331/v1/chat/completions \
   -d '{"model":"profile:general-assistant","messages":[{"role":"user","content":"Hello"}]}'
 ```
 
-`/v1/models` lists profiles as `profile:<id>`. Chat accepts that id or a model id. Streaming uses server-sent events and ends with `data: [DONE]`. Compatibility limits are in [docs/api.md](docs/api.md). Runnable examples are in [examples/](examples/).
+`/v1/models` lists profiles as `profile:<id>`. Chat accepts that id or a model id. Streaming uses server-sent events and ends with `data: [DONE]`. After a model is running, the examples under [examples/](examples/) call these routes. Compatibility limits are in [docs/api.md](docs/api.md).
 
 ## Supported platforms
 
 | Platform | How to run it |
 | --- | --- |
-| macOS Apple Silicon and Intel | Source build, or a darwin headless archive from Releases |
-| Linux amd64 and arm64 | Source build, `.deb`, or `.rpm` |
-| Windows amd64 | Source build. A headless archive is produced on the next tagged release |
+| macOS Apple Silicon and Intel | Homebrew, a darwin headless archive, or a source build |
+| Linux amd64 and arm64 | `.deb`, `.rpm`, or a source build |
+| Windows amd64 | Source build. An unsigned headless archive is produced on the next tagged release |
 
 ## Supported hardware
 
-The daemon inventories the host on macOS, Windows, and Linux, including NVIDIA, AMD, Intel, and Apple GPUs when the platform probes succeed. That is detection code, not a promise that inference has been measured on every combination. The matrix and the gaps are in [docs/compatibility.md](docs/compatibility.md). A hardware report is a useful contribution.
+The daemon inventories the host on macOS, Windows, and Linux, including NVIDIA, AMD, Intel, and Apple GPUs when the platform probes succeed. Detection is not a promise that inference has been measured on every combination. The matrix is in [docs/compatibility.md](docs/compatibility.md). A hardware report is a useful contribution.
 
 ## Supported runtimes
 
@@ -154,46 +176,41 @@ The daemon inventories the host on macOS, Windows, and Linux, including NVIDIA, 
 | `llamacpp` | Managed `llama-server` from llama.cpp GitHub releases. Models are GGUF. | Implemented |
 | `external-openai` | A remote OpenAI-compatible base URL you configure. It is not installed as a local binary. | Implemented |
 
-llama.cpp asset selection is per OS and CPU architecture. The Windows asset the installer looks for is `bin-win-cpu-x64`. Capability reporting can still list Vulkan or CUDA as possible backends. See [docs/runtimes.md](docs/runtimes.md).
+Asset selection is per OS and CPU architecture. The Windows asset the installer looks for is `bin-win-cpu-x64`. See [docs/runtimes.md](docs/runtimes.md).
 
-## CLI examples
+## CLI
 
-The daemon is `yggdrasil-daemon`. The helper in this repository is `yggctl`, built from `cmd/devctl`.
+Installed and source builds both provide `yggdrasil-daemon` and `yggctl`.
 
 ```bash
-go build -o bin/yggdrasil-daemon ./cmd/daemon
-go build -o bin/yggctl ./cmd/devctl
-./bin/yggdrasil-daemon -version
-./bin/yggctl version
-./bin/yggctl about
-./bin/yggctl paths
+yggdrasil-daemon
+yggdrasil-daemon -version
+yggctl version
+yggctl about
+yggctl paths
 ```
 
-`yggctl version` and `yggctl about` print the same corresponding-source notice: version, AGPL license, source URL, and commit. `yggdrasil-daemon -version` prints that notice and exits. `yggctl paths` prints the default data, model, runtime, log, and database directories. There is no `yggctl status`, `nodes`, or `models` command. Those queries are HTTP routes under `/api/v1/`. A fuller CLI is listed on the [roadmap](ROADMAP.md).
-
-`./bin/yggdrasil-daemon -data-dir /path/to/dir` overrides the data directory.
+`yggctl version` and `yggctl about` print the version, the AGPL license, the source URL, and the commit. `yggdrasil-daemon -version` prints that notice and exits. `yggctl paths` prints the data, model, runtime, log, and database directories. Status, nodes, and models are HTTP routes under `/api/v1/`. A fuller CLI is on the [roadmap](ROADMAP.md). `yggdrasil-daemon -data-dir /path/to/dir` overrides the data directory.
 
 ## Configuration
 
-On first start the daemon writes `config.json` in the data directory. Defaults:
+On first start the daemon writes `config.json` in the data directory.
 
 | | |
 | --- | --- |
 | API | `127.0.0.1:7331` |
-| Bifrost | port `7332` (bound on all interfaces when discovery is on, which is the default) |
-| Web UI | enabled, if a built UI is found |
+| Bifrost | port `7332`, on all interfaces when discovery is on (the default) |
+| Web UI | enabled, when a built UI is found |
 | LAN API | off |
 | Discovery | on |
 
-Data directories:
-
-| OS | Path |
+| OS | Data directory |
 | --- | --- |
 | macOS | `~/Library/Application Support/Yggdrasil` |
 | Windows | `%LOCALAPPDATA%\Yggdrasil` |
 | Linux | `$XDG_DATA_HOME/yggdrasil` or `~/.local/share/yggdrasil` |
 
-Models, runtimes, logs, `yggdrasil.db`, and a `secrets/` directory live under that path. `YGGDRASIL_*` environment variables override bind addresses, node identity, static peers, and discovery for Docker or CI. See [docs/privacy.md](docs/privacy.md).
+Models, runtimes, logs, `yggdrasil.db`, and `secrets/` live under that path. `YGGDRASIL_*` variables override bind addresses, node identity, static peers, and discovery. See [docs/privacy.md](docs/privacy.md) and [docs/api.md](docs/api.md).
 
 ## Security and privacy
 
@@ -205,20 +222,34 @@ The control API and the OpenAI-compatible API require a bearer token whenever th
 
 | | |
 | --- | --- |
+| [User guide](docs/user-guide/README.md) | Source for the public guide |
+| [Troubleshooting](docs/troubleshooting.md) | First checks when something fails |
+| [Capabilities](docs/capabilities.md) | Internet, Files, Shell, and Git |
+| [Tools](docs/tools.md) | Tool registry and permissions |
 | [Architecture](docs/architecture.md) | Subsystems and process layout |
 | [API](docs/api.md) | Control plane and OpenAI-compatible routes |
 | [Runtimes](docs/runtimes.md) | llama.cpp and external servers |
 | [Clustering](docs/clustering.md) | Discovery, pairing, placement |
 | [Compatibility](docs/compatibility.md) | Hardware matrix |
 | [Privacy](docs/privacy.md) | What stays local and what can leave |
-| [Development](docs/development.md) | Build, test, and CI |
-| [Troubleshooting](docs/troubleshooting.md) | First checks when something fails |
-| [Capabilities](docs/capabilities.md) | Internet, Files, Shell, and Git |
-| [Tools](docs/tools.md) | Tool registry and permissions |
-| [User guide](docs/user-guide/README.md) | Source for the public guide |
-| [Roadmap](ROADMAP.md) | Now, next, and research |
+| [Development](docs/development.md) | Build, test, lint, and CI |
 
 The public site is [yggdrasil.yeix.io](https://yggdrasil.yeix.io). It reads the version index, guide snapshots, the latest GitHub release, and [`site/content.json`](site/content.json) from this repository.
+
+### Planned designs
+
+These are specifications. They are not implemented in this repository.
+
+- [Persistent memory and cross-model context](docs/features/persistent-memory-and-cross-model-context.md)
+- [Scheduler and automations](docs/features/scheduler-and-automations.md)
+- [Train your own AI](docs/features/train-your-own-ai.md)
+- [Kubernetes-native model deployment](docs/features/kubernetes-native-model-deployment.md)
+
+### Research
+
+This brief is not a commitment to build.
+
+- [Distributed inference grid](docs/research/distributed-inference-grid-research.md)
 
 ## Roadmap
 
@@ -228,7 +259,20 @@ The public site is [yggdrasil.yeix.io](https://yggdrasil.yeix.io). It reads the 
 
 Hardware reports, runtime notes, documentation, and code all help. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Code contributions are covered by the [Yggdrasil Contributor License Agreement](CLA.md).
 
-Security reports should stay off public issues. See [SECURITY.md](SECURITY.md).
+## Community
+
+- **Questions and brainstorming:** [GitHub Discussions](https://github.com/yeixio/yggdrasil-core/discussions)
+- **Bugs and actionable feature requests:** [GitHub Issues](https://github.com/yeixio/yggdrasil-core/issues)
+- **Security vulnerabilities:** [SECURITY.md](SECURITY.md)
+- **Contributing code:** [CONTRIBUTING.md](CONTRIBUTING.md)
+
+[SUPPORT.md](SUPPORT.md) maps each kind of report to a form.
+
+## Support Yggdrasil Core
+
+If Yggdrasil Core is useful to you, you can support continued development through [GitHub Sponsors](https://github.com/sponsors/gopherstein). Contributions, testing, bug reports, documentation, and hardware compatibility reports are also valuable ways to support the project.
+
+Nothing in the software is gated on a donation.
 
 ## Yggdrasil Desktop
 
@@ -238,16 +282,6 @@ Yggdrasil Desktop and Yggdrasil Mobile are separate products. They are clients f
 
 ## License
 
-[GNU Affero General Public License v3.0 or later](LICENSE). SPDX identifier: `AGPL-3.0-or-later`.
+Copyright (C) 2026 YEIXIO LLC. Source code is [GNU Affero General Public License v3.0 or later](LICENSE). SPDX identifier: `AGPL-3.0-or-later`.
 
-The copyright notice is in [NOTICE](NOTICE). Brand use is described in [TRADEMARKS.md](TRADEMARKS.md).
-
-## Support Yggdrasil Core
-
-If Yggdrasil Core is useful to you, you can support continued development through [GitHub Sponsors](https://github.com/sponsors/gopherstein). Contributions, testing, bug reports, documentation, and hardware compatibility reports are also valuable ways to support the project.
-
-Nothing in the software is gated on a donation.
-
-Questions, bugs, and ideas belong in GitHub Issues. A map of where to write is in [SUPPORT.md](SUPPORT.md).
-
-Yggdrasil Core is open source and community contributions are welcome. Hardware reports, runtime integrations, bug reports, documentation improvements, and code contributions all help make local AI work across more systems.
+The copyright notice is in [NOTICE](NOTICE). Brand use is described in [TRADEMARKS.md](TRADEMARKS.md). Trademarks are not included in the license grant.

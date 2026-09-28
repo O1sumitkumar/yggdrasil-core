@@ -16,7 +16,7 @@ type ApiProbeResult = {
 }
 
 async function probeLocalApi(lanEnabled: boolean): Promise<ApiProbeResult> {
-  let healthOk = false
+  let healthOk: boolean
   try {
     const health = await api.getHealth()
     healthOk = health?.status === 'ok'
@@ -37,7 +37,7 @@ async function probeLocalApi(lanEnabled: boolean): Promise<ApiProbeResult> {
     }
   }
 
-  let openaiStatus: number | null = null
+  let openaiStatus: number | null
   try {
     const headers: Record<string, string> = { Accept: 'application/json' }
     const key = storedApiKey()

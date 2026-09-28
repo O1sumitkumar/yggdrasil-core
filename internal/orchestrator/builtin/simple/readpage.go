@@ -132,10 +132,7 @@ func usefulPageText(content string) bool {
 		return false
 	}
 	lower := strings.ToLower(text)
-	if strings.Contains(lower, "unknown location") {
-		return false
-	}
-	return true
+	return !strings.Contains(lower, "unknown location")
 }
 
 func orderedSearchURLs(prompt string, result map[string]any) []string {

@@ -11,7 +11,7 @@ This list is directional. It is not a commitment and it has no dates. Shipped be
 - loopback OpenAI-compatible chat and model list
 - local web UI
 - Linux packages, macOS headless archives, checksums, and a Windows amd64 archive in the release script
-- tests, `govulncheck`, and cross-compiled CI builds
+- tests, lint, `govulncheck`, and cross-compiled CI builds
 
 ## Next
 

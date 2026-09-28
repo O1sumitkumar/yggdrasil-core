@@ -86,9 +86,10 @@ func Recommend(catalog *Catalog, input RecommendInput) (contracts.Recommendation
 			continue
 		}
 		seen[role.ModelID] = struct{}{}
-		if role.ModelID == primary.ID {
+		switch role.ModelID {
+		case primary.ID:
 			modelsOut = append(modelsOut, entryToContract(primary, false))
-		} else if role.ModelID == secondary.ID {
+		case secondary.ID:
 			modelsOut = append(modelsOut, entryToContract(secondary, false))
 		}
 	}
@@ -301,9 +302,10 @@ func RecommendWithPresets(catalog *Catalog, presets []PurposePreset, input Recom
 			continue
 		}
 		seen[role.ModelID] = struct{}{}
-		if role.ModelID == primary.ID {
+		switch role.ModelID {
+		case primary.ID:
 			modelsOut = append(modelsOut, entryToContract(primary, false))
-		} else if role.ModelID == secondary.ID {
+		case secondary.ID:
 			modelsOut = append(modelsOut, entryToContract(secondary, false))
 		}
 	}

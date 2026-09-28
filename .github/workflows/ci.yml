@@ -35,8 +35,47 @@ jobs:
           fi
       - name: Vet
         run: go vet ./...
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.14.0
       - name: Test
-        run: go test ./...
+        run: go test ./... -coverprofile=coverage.out
+      - name: Upload coverage profile
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-profile
+          path: coverage.out
+          retention-days: 1
+          if-no-files-found: error
+
+  coverage-badge:
+    needs: go
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: coverage-badge
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.x"
+      - uses: actions/download-artifact@v7
+        with:
+          name: coverage-profile
+          path: .
+      - name: Publish coverage badge
+        env:
+          PUBLISH_COVERAGE_BADGE: "1"
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          chmod +x scripts/publish-coverage-badge.sh
+          ./scripts/publish-coverage-badge.sh coverage.out
 
   build:
     runs-on: ubuntu-latest
@@ -87,6 +126,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install
+      - run: pnpm lint
       - run: pnpm exec tsc -b --pretty false
       - run: pnpm test
       - run: pnpm build

@@ -100,9 +100,6 @@ func (a *App) RunChat(ctx context.Context, profileID, conversationID, message st
 		}
 	}
 
-	if saveTask, _ := a.Settings.GetBool(ctx, "save_task_history", true); !saveTask {
-		// Still run orchestration; Tasks.Create is required for execution plumbing.
-	}
 	task, err := a.Tasks.Create(ctx, profileID, conversationID, message)
 	if err != nil {
 		return nil, err
@@ -154,7 +151,7 @@ func (a *App) RunChat(ctx context.Context, profileID, conversationID, message st
 			}
 			if evt.Type == "agent.completed" && evt.Role != "" {
 				// Team emits a final Done envelope after the three roles; skip that one.
-				if !(teamMode && evt.Done) {
+				if !teamMode || !evt.Done {
 					step := roleStepFromEvent(a, profile, evt)
 					if step.NodeID == "" {
 						if id, ok := env.roleNode(evt.Role); ok {

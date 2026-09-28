@@ -69,14 +69,14 @@ func pinnedNodeError(input ScoreInput) error {
 	}
 
 	if pinned == nil {
-		return fmt.Errorf(
+		return fmt.Errorf( //nolint:staticcheck // ST1005: sentence shown in the UI
 			"%s is not available (required for role %s). Pair that computer again, or set the role to Automatic placement.",
 			label, input.Role,
 		)
 	}
 	st := pinned.Node.Status
 	if st != contracts.NodeStatusOnline && st != "" {
-		return fmt.Errorf(
+		return fmt.Errorf( //nolint:staticcheck // ST1005: sentence shown in the UI
 			"%s is offline (required for role %s). Turn that computer on and open Yggdrasil, or set the role to Automatic placement.",
 			label, input.Role,
 		)

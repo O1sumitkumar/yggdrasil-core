@@ -18,7 +18,7 @@ make frontend
 make daemon
 ```
 
-`make daemon` writes `bin/yggdrasil-daemon` and `bin/yggctl`, and stamps the current git commit into both. `yggctl version` and `yggdrasil-daemon -version` print the license and the corresponding-source URL. Release packaging sets the version as well, so a tagged build points at `tree/v<version>`.
+`make daemon` writes `bin/yggdrasil-daemon` and `bin/yggctl`, and stamps the current git commit into both. A build from this tree reports `0.1.0-dev` unless `-ldflags` sets `internal/version.Version`. `yggctl version` and `yggdrasil-daemon -version` print the license and the corresponding-source URL. Release packaging sets the version as well, so a tagged build points at `tree/v<version>`.
 
 A fork that serves a modified daemon over the network sets its own source URL at build time:
 
@@ -53,7 +53,7 @@ make test
 make vet
 ```
 
-`make test` is `go test ./...`. `make ci` runs format, vet, tests, and the frontend job locally.
+`make test` is `go test ./...`. `make ci` runs format, vet, tests, and the frontend job locally. A push to `main` publishes the README coverage badge from `go test ./... -coverprofile`. CI does not enforce a coverage percentage.
 
 Web tests alone:
 
@@ -79,18 +79,18 @@ python3 scripts/publish-docs.py --destination /tmp/ygg-docs-check \
 
 Go formatting is `gofmt` via `make fmt`. CI fails if a Go file outside `web/`, `vendor/`, and `node_modules/` is not `gofmt`-clean.
 
-Go lint in CI is `go vet ./...`. There is no golangci-lint config.
+`make lint` runs golangci-lint v2.14.0 (`.golangci.yml`: errcheck, govet, ineffassign, staticcheck, unused) and `pnpm lint` in `web/`. CI uses the same golangci-lint version. Install it with the upstream install script, or `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0`. `go vet ./...` still runs on its own.
 
-The web check in CI is `pnpm exec tsc -b --pretty false`, `pnpm test`, and `pnpm build`. There is no ESLint script in `web/package.json`.
+The web check in CI is `pnpm lint`, `pnpm exec tsc -b --pretty false`, `pnpm test`, and `pnpm build`. ESLint covers `web/src` and `web/vite.config.ts`. Generated files in `web/wailsjs` are ignored. Hook rules are `rules-of-hooks` and `exhaustive-deps`. Warnings do not fail the job.
 
 ## CI
 
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) on Ubuntu:
 
 - user-guide publish checks
-- `gofmt`, `go vet`, `go test ./...`
+- `gofmt`, `go vet`, golangci-lint, `go test ./...`
 - cross-compiles of `yggdrasil-daemon` and `yggctl` for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, and windows/amd64 (`CGO_ENABLED=0`)
-- web typecheck, test, and build
+- web lint, typecheck, test, and build
 
 [`.github/workflows/security.yml`](../.github/workflows/security.yml) runs `govulncheck ./...` and `pnpm audit --prod` in `web/`. The audit step does not fail the job (`|| true`).
 

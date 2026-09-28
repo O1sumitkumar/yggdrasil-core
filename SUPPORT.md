@@ -12,9 +12,9 @@ Use this repository for Yggdrasil Core. Desktop and mobile applications are sepa
 | Documentation | [Documentation form](.github/ISSUE_TEMPLATE/documentation.yml) |
 | A vulnerability | [SECURITY.md](SECURITY.md). Not a public issue. |
 | A code of conduct report | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Email conduct@yeix.io. Not a public issue. |
-| A question or an idea to discuss | GitHub Discussions, once enabled |
+| A question or an idea to discuss | [GitHub Discussions](https://github.com/yeixio/yggdrasil-core/discussions) |
 
-GitHub Issues are the support queue. GitHub Discussions are the preferred place for questions that are not defects. Enable Discussions before launch, with categories along these lines:
+GitHub Issues are the queue for bugs and actionable requests. GitHub Discussions are the place for questions and brainstorming. Categories:
 
 - General
 - Ideas

@@ -53,10 +53,11 @@ cd web && pnpm test
 ## Lint
 
 ```bash
+make lint
 make vet
 ```
 
-CI also runs `gofmt -l`. There is no separate golangci-lint or ESLint target.
+`make lint` runs golangci-lint v2.14.0 and `pnpm lint` in `web/`. CI runs the same checks. ESLint warnings are reported and do not fail the job.
 
 ## Formatting
 
