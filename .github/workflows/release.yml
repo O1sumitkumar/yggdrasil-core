@@ -85,6 +85,12 @@ jobs:
           git -C "$workdir" add dists pool
           git -C "$workdir" commit -m "Update the apt repository."
           git -C "$workdir" push origin HEAD:apt
+
+  start-desktop:
+    needs: release
+    if: success()
+    runs-on: ubuntu-latest
+    steps:
       - name: Start the matching desktop release
         env:
           DESKTOP_TOKEN: ${{ secrets.YGGDRASIL_DESKTOP_TOKEN }}
@@ -92,7 +98,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${DESKTOP_TOKEN}" ]; then
-            echo "YGGDRASIL_DESKTOP_TOKEN is not set. The desktop repository checks for this release every hour."
+            echo "YGGDRASIL_DESKTOP_TOKEN is not set. The desktop repository checks for this release every hour after this job succeeds."
             exit 0
           fi
           GH_TOKEN="$DESKTOP_TOKEN" gh api repos/yeixio/yggdrasil-desktop/dispatches \
