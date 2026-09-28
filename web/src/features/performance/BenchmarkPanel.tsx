@@ -39,8 +39,8 @@ function SelectCard({
       className={[
         'min-w-0 rounded-xl p-4 text-left transition duration-150',
         selected
-          ? 'bg-primary-soft shadow-[inset_0_0_0_1.5px_rgb(var(--color-primary)/0.55)]'
-          : 'bg-surface shadow-[inset_0_0_0_1px_rgb(var(--color-line)/0.55)] hover:bg-raised/70',
+          ? 'bg-primary-soft shadow-[inset_0_0_0_1.5px_rgb(var(--rgb-primary)/0.55)]'
+          : 'bg-surface shadow-[inset_0_0_0_1px_rgb(var(--rgb-line)/0.55)] hover:bg-raised/70',
       ].join(' ')}
     >
       <p

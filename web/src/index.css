@@ -1,35 +1,77 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
 
 /*
   Yggdrasil design system
   Identity: winter night + fjord water + aurora + old Norse metalwork
   Dark is the primary brand surface; light mirrors it with cool gray-blue daylight.
+  Channel variables (--rgb-*) switch with data-theme. Utilities read them through @theme inline.
 */
+
+@theme {
+  --font-display: Outfit, system-ui, sans-serif;
+  --font-sans: Figtree, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --spacing-page-x: 2rem;
+  --spacing-page-y: 2rem;
+  --spacing-section: 1.5rem;
+
+  --radius-panel: 0.75rem;
+
+  --color-ygg: #4fd1c5;
+  --color-bifrost: #5bb8d4;
+  --color-norn: #9b8cdb;
+  --color-huginn: #b7c0cc;
+  --color-muninn: #6b7ac7;
+  --color-mimir: #c6a15b;
+  --color-heimdall: #d8a657;
+  --color-gungnir: #c57a5a;
+}
+
+@theme inline {
+  --color-canvas: rgb(var(--rgb-canvas));
+  --color-surface: rgb(var(--rgb-surface));
+  --color-raised: rgb(var(--rgb-raised));
+  --color-sidebar: rgb(var(--rgb-sidebar));
+  --color-line: rgb(var(--rgb-line));
+  --color-ink: rgb(var(--rgb-ink));
+  --color-ink-muted: rgb(var(--rgb-ink-muted));
+  --color-ink-faint: rgb(var(--rgb-ink-faint));
+  --color-primary: rgb(var(--rgb-primary));
+  --color-primary-hover: rgb(var(--rgb-primary-hover));
+  --color-primary-soft: rgb(var(--rgb-primary-soft));
+  --color-primary-fg: rgb(var(--rgb-primary-fg));
+  --color-primary-active: rgb(var(--rgb-primary-active-text));
+  --color-accent: rgb(var(--rgb-accent));
+  --color-accent-soft: rgb(var(--rgb-accent-soft));
+  --color-success: rgb(var(--rgb-success));
+  --color-warning: rgb(var(--rgb-warning));
+  --color-danger: rgb(var(--rgb-danger));
+  --color-info: rgb(var(--rgb-info));
+}
 
 :root,
 [data-theme='light'] {
   /* Cool gray-blue daylight — same product as dark, not generic SaaS white */
-  --color-canvas: 240 244 248; /* #F0F4F8 — slightly lighter work surface */
-  --color-surface: 248 251 253; /* #F8FBFD */
-  --color-raised: 226 233 240; /* #E2E9F0 */
-  --color-sidebar: 228 234 240; /* #E4EAF0 — slightly deeper chrome */
-  --color-line: 196 208 220; /* #C4D0DC — stronger card edges */
-  --color-ink: 18 28 38; /* #121C26 */
-  --color-ink-muted: 88 106 122; /* #586A7A */
-  --color-ink-faint: 104 117 131; /* #687583 */
-  --color-primary: 22 124 120; /* #167C78 — buttons / focus / indicators */
-  --color-primary-hover: 18 104 100;
-  --color-primary-soft: 230 244 242; /* #E6F4F2 — muted selection fills */
-  --color-primary-active-text: 21 94 90; /* #155E5A */
-  --color-primary-fg: 255 255 255;
-  --color-accent: 154 116 51; /* #9A7433 muted gold */
-  --color-accent-soft: 240 232 214;
-  --color-success: 47 143 110;
-  --color-warning: 184 130 48;
-  --color-danger: 196 84 84;
-  --color-info: 74 130 180;
+  --rgb-canvas: 240 244 248; /* #F0F4F8 — slightly lighter work surface */
+  --rgb-surface: 248 251 253; /* #F8FBFD */
+  --rgb-raised: 226 233 240; /* #E2E9F0 */
+  --rgb-sidebar: 228 234 240; /* #E4EAF0 — slightly deeper chrome */
+  --rgb-line: 196 208 220; /* #C4D0DC — stronger card edges */
+  --rgb-ink: 18 28 38; /* #121C26 */
+  --rgb-ink-muted: 88 106 122; /* #586A7A */
+  --rgb-ink-faint: 104 117 131; /* #687583 */
+  --rgb-primary: 22 124 120; /* #167C78 — buttons / focus / indicators */
+  --rgb-primary-hover: 18 104 100;
+  --rgb-primary-soft: 230 244 242; /* #E6F4F2 — muted selection fills */
+  --rgb-primary-active-text: 21 94 90; /* #155E5A */
+  --rgb-primary-fg: 255 255 255;
+  --rgb-accent: 154 116 51; /* #9A7433 muted gold */
+  --rgb-accent-soft: 240 232 214;
+  --rgb-success: 47 143 110;
+  --rgb-warning: 184 130 48;
+  --rgb-danger: 196 84 84;
+  --rgb-info: 74 130 180;
   --color-shadow: 40 60 80;
   --shadow-panel: 0 1px 2px rgb(40 60 80 / 0.06), 0 8px 24px -8px rgb(40 60 80 / 0.14);
   --aurora-primary-alpha: 0.08;
@@ -38,25 +80,25 @@
 }
 
 [data-theme='dark'] {
-  --color-canvas: 14 19 26; /* #0E131A — hair lighter than chrome */
-  --color-surface: 17 24 33; /* #111821 */
-  --color-raised: 24 34 46; /* #18222E */
-  --color-sidebar: 8 11 16; /* #080B10 — slightly deeper app chrome */
-  --color-line: 39 51 65; /* #273341 */
-  --color-ink: 238 242 246; /* #EEF2F6 */
-  --color-ink-muted: 154 167 181; /* #9AA7B5 */
-  --color-ink-faint: 104 117 131; /* #687583 */
-  --color-primary: 79 209 197; /* #4FD1C5 — bright: buttons / rings / dots */
-  --color-primary-hover: 109 224 214; /* #6DE0D6 */
-  --color-primary-soft: 18 56 58; /* #12383A — muted selection fill */
-  --color-primary-active-text: 109 224 214; /* #6DE0D6 */
-  --color-primary-fg: 11 15 20;
-  --color-accent: 198 161 91; /* #C6A15B */
-  --color-accent-soft: 48 40 24;
-  --color-success: 95 191 143;
-  --color-warning: 216 166 87;
-  --color-danger: 217 104 104;
-  --color-info: 111 168 220;
+  --rgb-canvas: 14 19 26; /* #0E131A — hair lighter than chrome */
+  --rgb-surface: 17 24 33; /* #111821 */
+  --rgb-raised: 24 34 46; /* #18222E */
+  --rgb-sidebar: 8 11 16; /* #080B10 — slightly deeper app chrome */
+  --rgb-line: 39 51 65; /* #273341 */
+  --rgb-ink: 238 242 246; /* #EEF2F6 */
+  --rgb-ink-muted: 154 167 181; /* #9AA7B5 */
+  --rgb-ink-faint: 104 117 131; /* #687583 */
+  --rgb-primary: 79 209 197; /* #4FD1C5 — bright: buttons / rings / dots */
+  --rgb-primary-hover: 109 224 214; /* #6DE0D6 */
+  --rgb-primary-soft: 18 56 58; /* #12383A — muted selection fill */
+  --rgb-primary-active-text: 109 224 214; /* #6DE0D6 */
+  --rgb-primary-fg: 11 15 20;
+  --rgb-accent: 198 161 91; /* #C6A15B */
+  --rgb-accent-soft: 48 40 24;
+  --rgb-success: 95 191 143;
+  --rgb-warning: 216 166 87;
+  --rgb-danger: 217 104 104;
+  --rgb-info: 111 168 220;
   --color-shadow: 0 0 0;
   --shadow-panel: 0 1px 0 rgb(255 255 255 / 0.03), 0 12px 32px -16px rgb(0 0 0 / 0.55);
   --aurora-primary-alpha: 0.12;
@@ -75,17 +117,17 @@
     background-image:
       radial-gradient(
         ellipse 80% 50% at 10% -10%,
-        rgb(var(--color-primary) / var(--aurora-primary-alpha)),
+        rgb(var(--rgb-primary) / var(--aurora-primary-alpha)),
         transparent 55%
       ),
       radial-gradient(
         ellipse 55% 35% at 100% 0%,
-        rgb(var(--color-accent) / var(--aurora-accent-alpha)),
+        rgb(var(--rgb-accent) / var(--aurora-accent-alpha)),
         transparent 45%
       ),
       radial-gradient(
         ellipse 50% 30% at 85% 100%,
-        rgb(var(--color-info) / var(--aurora-info-alpha)),
+        rgb(var(--rgb-info) / var(--aurora-info-alpha)),
         transparent 50%
       );
   }
@@ -95,8 +137,8 @@
   }
 
   ::selection {
-    background: rgb(var(--color-primary) / 0.28);
-    color: rgb(var(--color-ink));
+    background: rgb(var(--rgb-primary) / 0.28);
+    color: rgb(var(--rgb-ink));
   }
 
   /* Kill browser default blue focus — brand teal everywhere */
@@ -105,7 +147,7 @@
   }
 
   :focus-visible {
-    outline: 2px solid rgb(var(--color-primary));
+    outline: 2px solid rgb(var(--rgb-primary));
     outline-offset: 2px;
   }
 
@@ -132,7 +174,7 @@
   }
 
   .btn-primary:focus-visible {
-    outline: 2px solid rgb(var(--color-primary));
+    outline: 2px solid rgb(var(--rgb-primary));
     outline-offset: 3px;
   }
 
@@ -150,30 +192,30 @@
 
   .nav-link-active {
     @apply bg-primary-soft font-semibold hover:bg-primary-soft;
-    color: rgb(var(--color-primary-active-text));
+    color: rgb(var(--rgb-primary-active-text));
   }
 
   .nav-link-active:hover {
-    color: rgb(var(--color-primary-active-text));
+    color: rgb(var(--rgb-primary-active-text));
   }
 
   .nav-link-active:focus-visible {
-    outline-color: rgb(var(--color-primary));
+    outline-color: rgb(var(--rgb-primary));
   }
 
   .selectable {
     @apply min-w-0 rounded-xl bg-surface p-4 text-left transition duration-150 hover:bg-raised/70;
-    box-shadow: inset 0 0 0 1px rgb(var(--color-line) / 0.55);
+    box-shadow: inset 0 0 0 1px rgb(var(--rgb-line) / 0.55);
   }
 
   .selectable-active {
     @apply bg-primary-soft;
-    box-shadow: inset 0 0 0 1.5px rgb(var(--color-primary) / 0.45);
+    box-shadow: inset 0 0 0 1.5px rgb(var(--rgb-primary) / 0.45);
   }
 
   .selectable-active > .font-semibold,
   .selectable-active .selectable-title {
-    color: rgb(var(--color-primary-active-text));
+    color: rgb(var(--rgb-primary-active-text));
   }
 
   .field {
@@ -183,13 +225,13 @@
   .field:focus,
   .field:focus-visible {
     outline: none;
-    border-color: rgb(var(--color-primary));
-    box-shadow: 0 0 0 3px rgb(var(--color-primary) / 0.22);
+    border-color: rgb(var(--rgb-primary));
+    box-shadow: 0 0 0 3px rgb(var(--rgb-primary) / 0.22);
   }
 
   .composer {
     @apply rounded-2xl bg-surface p-3.5;
-    box-shadow: var(--shadow-panel), inset 0 0 0 1px rgb(var(--color-line) / 0.45);
+    box-shadow: var(--shadow-panel), inset 0 0 0 1px rgb(var(--rgb-line) / 0.45);
   }
 
   .composer-input {
@@ -218,7 +260,7 @@
   }
 
   .composer-select select:focus-visible {
-    outline: 2px solid rgb(var(--color-primary));
+    outline: 2px solid rgb(var(--rgb-primary));
     outline-offset: 1px;
   }
 
@@ -231,7 +273,7 @@
   }
 
   .chat-suggestion:focus-visible {
-    outline: 2px solid rgb(var(--color-primary));
+    outline: 2px solid rgb(var(--rgb-primary));
     outline-offset: 2px;
   }
 
@@ -266,11 +308,11 @@
   }
 
   .badge-preferred {
-    @apply status-chip bg-accent-soft text-accent;
+    @apply inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-medium bg-accent-soft text-accent;
   }
 
   .badge-mimir {
-    @apply status-chip bg-mimir/15 text-mimir;
+    @apply inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-medium bg-mimir/15 text-mimir;
   }
 
   .label-caps {
@@ -298,7 +340,7 @@
   }
 
   .settings-group-label {
-    @apply label-caps px-1;
+    @apply text-[10px] font-medium uppercase tracking-[0.14em] text-ink-faint px-1;
   }
 
   .animate-fade {
