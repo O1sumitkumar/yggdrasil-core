@@ -111,7 +111,7 @@ Issue labels are defined in [`.github/labels.yml`](../.github/labels.yml). GitHu
 
 Tag `v*` → release workflow → Linux `.deb` and `.rpm` (amd64 and arm64), macOS headless archives (arm64 and amd64), Windows amd64 headless archive, `SHA256SUMS.txt` → GitHub Release.
 
-The same job writes `Formula/yggdrasil.rb`, merges that formula onto `main`, and updates the `apt` branch. Signing is not part of this workflow. The checklist is [release-checklist.md](release-checklist.md).
+The same job opens a Homebrew formula pull request and updates the `apt` branch. A failure in the formula step does not fail the release. Signing is not part of this workflow. The checklist is [release-checklist.md](release-checklist.md).
 
 ## Conventions
 

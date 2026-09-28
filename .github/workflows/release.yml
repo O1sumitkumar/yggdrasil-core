@@ -51,16 +51,18 @@ jobs:
             dist/*.tar.gz
             dist/SHA256SUMS.txt
       - name: Open the Homebrew formula pull request
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # The new formula is already written in the worktree. Keep a copy, then
+          # discard that change so checkout can switch onto main.
           cp Formula/yggdrasil.rb /tmp/yggdrasil.rb
-          cp -a dist/apt /tmp/ygg-apt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git fetch origin main
-          git checkout -B formula origin/main
+          git checkout -f -B formula origin/main
           mkdir -p Formula
           cp /tmp/yggdrasil.rb Formula/yggdrasil.rb
           git add Formula/yggdrasil.rb
@@ -79,9 +81,6 @@ jobs:
             # main requires a pull request. Merge it in this job so the formula is on the default branch Homebrew taps.
             gh pr merge formula --squash --admin
           fi
-          rm -rf dist/apt
-          mkdir -p dist
-          cp -a /tmp/ygg-apt dist/apt
       - name: Publish the apt repository
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
