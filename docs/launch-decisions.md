@@ -22,17 +22,17 @@ The longer inventory is [open-source-launch-checklist.md](open-source-launch-che
 - [x] **11. Labels.** `.github/labels.yml` is the definition. `./scripts/sync-github-labels.sh` created or updated those labels on GitHub. CI does not run that script.
 - [x] **12. Seed issues.** Issues [#3](https://github.com/yeixio/yggdrasil-core/issues/3) through [#10](https://github.com/yeixio/yggdrasil-core/issues/10) are open. Four are `good first issue`: shell completion, the missing llama-server error, and streaming in the Python and JavaScript examples.
 - [x] **13. Git history.** Reviewed all 15 commits, from the 2026-09-25 initial commit through `629b0af`. No private keys, token prefixes, credential files, or assigned secrets. The GitHub repository is public. History was not rewritten.
-- [ ] **14. Homebrew formula.** Do not document `brew install` until `Formula/yggdrasil.rb` is on `main` and a clean install works. The release workflow builds the macOS archives, fills the formula from `SHA256SUMS.txt`, and opens a pull request from the `formula` branch. This repository is the tap. A separate `homebrew-yggdrasil` repository, and a formula in Homebrew core, are not set up. The installed commands are `yggdrasil-daemon` and `yggctl`.
-  - [ ] Release created
-  - [ ] Release workflow produced the macOS headless archives
-  - [ ] Formula pull request opened
-  - [ ] Formula pull request merged into `main`
-  - [ ] Formula URL and SHA256 match that release
-  - [ ] `brew install` tested on a machine without a local dev build
-  - [ ] `yggdrasil-daemon -version` runs
-  - [ ] `yggctl version` runs
-  - [ ] Uninstall and reinstall work
-  - [ ] README matches the command that was tested
+- [x] **14. Homebrew formula.** `Formula/yggdrasil.rb` for 1.2.0-beta.3 is on `main`. The release workflow fills it from `SHA256SUMS.txt` and merges the `formula` pull request. This repository is the tap (`brew tap yeixio/yggdrasil https://github.com/yeixio/yggdrasil-core`). A separate `homebrew-yggdrasil` repository, and a formula in Homebrew core, are not set up. The installed commands are `yggdrasil-daemon` and `yggctl`. `brew install yggdrasil` is a different Homebrew cask, so the documented command is `brew install yeixio/yggdrasil/yggdrasil`.
+  - [x] Release created
+  - [x] Release workflow produced the macOS headless archives
+  - [x] Formula pull request opened
+  - [x] Formula pull request merged into `main`
+  - [x] Formula URL and SHA256 match that release
+  - [x] `brew install` tested on a machine without a local dev build
+  - [ ] `yggdrasil-daemon -version` runs. The 1.2.0-beta.3 archive does not define that flag. Current source does.
+  - [x] `yggctl version` runs
+  - [x] Uninstall and reinstall work
+  - [x] README matches the command that was tested
 - [ ] **15. Clean install.** Try a clean install on macOS, Linux, and Windows. The Windows amd64 archive is produced by the release script and is not on a published release yet.
 - [ ] **16. Demo.** `make screenshots` records a walkthrough of the demo UI into `docs/screenshots/demo.mp4`. A live recording is still open: start the daemon, discover another computer, install and run a model, send an API request, and show Norn placing a role.
 

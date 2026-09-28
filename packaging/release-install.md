@@ -1,6 +1,14 @@
 ## Install
 
-macOS. Homebrew support is coming soon. Use the headless archive attached to this release.
+macOS. Homebrew installs Yggdrasil Core from this repository. It does not install Yggdrasil Desktop. The short command `brew install yggdrasil` is a different Homebrew cask.
+
+```bash
+brew tap yeixio/yggdrasil https://github.com/yeixio/yggdrasil-core
+brew install yeixio/yggdrasil/yggdrasil
+yggdrasil-daemon
+```
+
+Or use the headless archive attached to this release:
 
 ```bash
 tar -xzf yggdrasil-*-darwin-*-headless.tar.gz

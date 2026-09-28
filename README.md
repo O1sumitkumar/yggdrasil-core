@@ -68,7 +68,15 @@ Open `http://127.0.0.1:7331`. The API listens on `127.0.0.1:7331` by default. Th
 
 Tagged releases attach macOS headless archives, Linux `.deb` and `.rpm` packages, and `SHA256SUMS.txt`. See [GitHub Releases](https://github.com/yeixio/yggdrasil-core/releases) and [packaging/release-install.md](packaging/release-install.md).
 
-Homebrew support is coming soon. A tagged release writes `Formula/yggdrasil.rb` and opens a pull request. That formula is not on `main`, so Homebrew is not an install path yet.
+macOS can install Core with Homebrew. This tap is the Core daemon, not Yggdrasil Desktop, and not the separate Homebrew cask named `yggdrasil`.
+
+```bash
+brew tap yeixio/yggdrasil https://github.com/yeixio/yggdrasil-core
+brew install yeixio/yggdrasil/yggdrasil
+yggdrasil-daemon
+```
+
+Open `http://127.0.0.1:7331`. A tagged release writes `Formula/yggdrasil.rb` and merges it to `main`.
 
 The same workflow publishes an apt repository on the `apt` branch. Debian and Ubuntu instructions are in [packaging/linux/README.md](packaging/linux/README.md).
 

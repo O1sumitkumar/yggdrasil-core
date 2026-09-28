@@ -58,8 +58,8 @@
   },
   "download": {
     "title": "Download",
-    "description": "Yggdrasil Desktop is the packaged app. This page lists Yggdrasil Core packages: headless archives, apt, deb, and rpm.",
-    "intro": "Yggdrasil Desktop is not in this list. The files below are Yggdrasil Core, the open-source engine. macOS Core builds are headless archives. Debian and Ubuntu can use apt. Homebrew is not an install path yet.",
+    "description": "Yggdrasil Desktop is the packaged app. This page lists Yggdrasil Core packages: Homebrew, headless archives, apt, deb, and rpm.",
+    "intro": "Yggdrasil Desktop is not in this list. The files below are Yggdrasil Core, the open-source engine. macOS can install Core with Homebrew. Debian and Ubuntu can use apt. The release files are headless archives and Linux packages, not the Desktop app.",
     "empty": "No Core packages are listed right now.",
     "issuesPrompt": "Found a bug in Core or want something added?"
   }

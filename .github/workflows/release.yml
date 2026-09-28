@@ -75,6 +75,8 @@ jobs:
                 --title "Publish the Homebrew formula for ${GITHUB_REF_NAME#v}" \
                 --body "Updates Formula/yggdrasil.rb from the ${GITHUB_REF_NAME} release."
             fi
+            # main requires a pull request. Merge it in this job so the formula is on the default branch Homebrew taps.
+            gh pr merge formula --squash --admin
           fi
           rm -rf dist/apt
           mkdir -p dist

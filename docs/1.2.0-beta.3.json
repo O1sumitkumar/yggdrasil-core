@@ -13,7 +13,7 @@
       "title": "Install and start your first chat",
       "paragraphs": [
         "Yggdrasil Desktop is distributed separately from this Core release. Use the official desktop channels for the packaged app. This page’s release files are Yggdrasil Core. Verify them against SHA256SUMS.txt. Core archives are not code-signed.",
-        "For Core, use the headless archive for your operating system and processor, or a Linux deb or rpm package. The daemon serves a web UI at http://127.0.0.1:7331. Homebrew is not an install path for this release."
+        "On macOS, Homebrew installs Core from this repository. Linux can use a deb or rpm package. Other systems use the headless archive. The daemon serves a web UI at http://127.0.0.1:7331."
       ],
       "steps": [
         "Open http://127.0.0.1:7331, or open Yggdrasil Desktop if you installed it separately. Follow the hardware and model setup. Allow enough disk space for model files and the managed runtime. The first model and runtime download require internet access.",
