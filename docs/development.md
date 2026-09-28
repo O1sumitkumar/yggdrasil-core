@@ -14,11 +14,12 @@ Linux package builds also need `nfpm` 2.41.3, as used by the release workflow. D
 ```bash
 git clone https://github.com/yeixio/yggdrasil-core.git
 cd yggdrasil-core
-make frontend
-make daemon
+make start
 ```
 
-`make daemon` writes `bin/yggdrasil-daemon` and `bin/yggctl`, and stamps the current git commit into both. A build from this tree reports `0.1.0-dev` unless `-ldflags` sets `internal/version.Version`. `yggctl version` and `yggdrasil-daemon -version` print the license and the corresponding-source URL. Release packaging sets the version as well, so a tagged build points at `tree/v<version>`.
+`make` with no target prints `make help`. `make start` installs web dependencies, writes `web/dist`, builds `bin/yggdrasil-daemon` and `bin/yggctl`, and runs the daemon with `YGGDRASIL_WEB_UI_DIR` set to `web/dist`. Open `http://127.0.0.1:7331`.
+
+`make daemon` stamps the current git commit into both binaries. A build from this tree reports `0.1.0-dev` unless `-ldflags` sets `internal/version.Version`. `yggctl version` and `yggdrasil-daemon -version` print the license and the corresponding-source URL. Release packaging sets the version as well, so a tagged build points at `tree/v<version>`.
 
 A fork that serves a modified daemon over the network sets its own source URL at build time:
 
@@ -29,16 +30,18 @@ A fork that serves a modified daemon over the network sets its own source URL at
 ## Run
 
 ```bash
-./bin/yggdrasil-daemon
+make start
 ```
 
-Optional data directory:
+That is the same as `make run-daemon`. It rebuilds `web/dist` and the binaries, then serves the UI from `web/dist`.
+
+Optional data directory, after `make daemon`:
 
 ```bash
-./bin/yggdrasil-daemon -data-dir "$PWD/.ygg-dev-data"
+YGGDRASIL_WEB_UI_DIR="$PWD/web/dist" ./bin/yggdrasil-daemon -data-dir "$PWD/.ygg-dev-data"
 ```
 
-The web UI is served from `web/dist` when that build exists. The Vite dev server is separate:
+`make ui` only builds the web UI. `make frontend` does that and runs the web tests. The Vite dev server is separate and proxies `/api` and `/v1` to the daemon:
 
 ```bash
 make run-web

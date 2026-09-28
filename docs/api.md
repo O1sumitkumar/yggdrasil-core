@@ -23,10 +23,10 @@ Bifrost, on port 7332, is a separate server. Its protected routes require a pair
 ```json
 {
   "name": "Yggdrasil Core",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "commit": "abc1234",
   "license": "AGPL-3.0-or-later",
-  "source": "https://github.com/yeixio/yggdrasil-core/tree/v1.2.0"
+  "source": "https://github.com/yeixio/yggdrasil-core/tree/v1.2.1"
 }
 ```
 

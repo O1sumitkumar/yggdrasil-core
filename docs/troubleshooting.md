@@ -5,9 +5,7 @@
 The daemon only serves a UI when it finds a directory containing `index.html`. From a clone, build it first:
 
 ```bash
-make frontend
-make daemon
-./bin/yggdrasil-daemon
+make start
 ```
 
 Then open `http://127.0.0.1:7331`. `GET /api/v1/health` still works if the UI was not built.

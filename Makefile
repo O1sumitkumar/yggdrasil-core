@@ -1,50 +1,72 @@
-.PHONY: all tidy test vet fmt lint frontend daemon ci test-cluster package-headless run-daemon run-web screenshots
+.DEFAULT_GOAL := help
 
-all: tidy test frontend
+COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+LDFLAGS := -X github.com/yeixio/yggdrasil-core/internal/version.Commit=$(COMMIT)
 
-tidy:
+.PHONY: help start ui frontend daemon run-daemon run-web all tidy test vet fmt lint ci test-cluster package-headless screenshots
+
+help: ## Show targets
+	@echo "Yggdrasil Core"
+	@echo ""
+	@echo "Start the app:"
+	@echo "  make start"
+	@echo ""
+	@echo "Then open http://127.0.0.1:7331"
+	@echo ""
+	@echo "Targets:"
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+start: ui daemon ## Build the web UI and daemon, then run it
+	@echo "Open http://127.0.0.1:7331"
+	YGGDRASIL_WEB_UI_DIR="$(CURDIR)/web/dist" ./bin/yggdrasil-daemon
+
+run-daemon: start ## Alias of start
+
+ui: ## Install web dependencies and build web/dist
+	cd web && pnpm install && pnpm build
+
+frontend: ## Install web dependencies, run web tests, and build web/dist
+	cd web && pnpm install && pnpm test && pnpm build
+
+daemon: ## Build bin/yggdrasil-daemon and bin/yggctl
+	go build -ldflags "$(LDFLAGS)" -o bin/yggdrasil-daemon ./cmd/daemon
+	go build -ldflags "$(LDFLAGS)" -o bin/yggctl ./cmd/devctl
+
+run-web: ## Start the Vite dev server on http://127.0.0.1:5173
+	cd web && pnpm dev
+
+all: tidy test frontend ## Tidy modules, run Go tests, and build the frontend
+
+tidy: ## Run go mod tidy
 	GOSUMDB=off go mod tidy
 
-fmt:
+fmt: ## Format Go files with gofmt
 	gofmt -w $$(find . -name '*.go' \
 		-not -path './web/*' \
 		-not -path './.gocache/*' \
 		-not -path './vendor/*' \
 		-not -path '*/node_modules/*')
 
-vet:
+vet: ## Run go vet
 	go vet ./...
 
-lint:
+lint: ## Run golangci-lint and web ESLint
 	golangci-lint run ./...
 	cd web && pnpm lint
 
-test:
+test: ## Run Go tests
 	go test ./...
 
-frontend:
-	cd web && pnpm install && pnpm test && pnpm build
+ci: fmt lint vet test frontend ## Run the local CI checks
 
-daemon:
-	go build -ldflags "-X github.com/yeixio/yggdrasil-core/internal/version.Commit=$$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" -o bin/yggdrasil-daemon ./cmd/daemon
-	go build -ldflags "-X github.com/yeixio/yggdrasil-core/internal/version.Commit=$$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" -o bin/yggctl ./cmd/devctl
-
-run-daemon: daemon
-	./bin/yggdrasil-daemon
-
-run-web:
-	cd web && pnpm dev
-
-test-cluster:
+test-cluster: ## Run the Docker cluster check
 	chmod +x scripts/cluster-e2e.sh
 	./scripts/cluster-e2e.sh
 
-package-headless:
+package-headless: ## Build a headless package for this machine
 	chmod +x scripts/build/package-headless.sh
 	./scripts/build/package-headless.sh
 
-ci: fmt lint vet test frontend
-
-screenshots:
+screenshots: ## Recapture docs/screenshots and the demo GIF
 	chmod +x scripts/capture-screenshots.sh
 	./scripts/capture-screenshots.sh

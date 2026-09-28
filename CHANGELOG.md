@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Thi
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-09-28
+
+Patch release. The API is unchanged. Binaries and the apt repository are not signed.
+
+### Added
+
+- Branching and release strategy guide in `docs/development/branching-and-release-strategy.md`.
+
+### Changed
+
+- Flat logo in the web UI, favicons, home-screen icons, and Linux package icons.
+- `make start` builds the UI and daemon and runs them. `make help` lists targets.
+
 ## [1.2.0] - 2026-09-28
 
 First stable release. It follows `v1.2.0-beta.3`. Binaries and the apt repository are not signed.

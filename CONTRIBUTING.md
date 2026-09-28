@@ -21,16 +21,13 @@ Go 1.26.3+, Node.js 22, and pnpm 9. Details, commands, and CI are in [docs/devel
 ```bash
 git clone https://github.com/yeixio/yggdrasil-core.git
 cd yggdrasil-core
-make frontend
-make daemon
-./bin/yggdrasil-daemon
+make start
 ```
 
 ## Build
 
 ```bash
 make daemon
-go build -o bin/yggctl ./cmd/devctl
 ```
 
 `make package-headless` builds a headless package for the machine you are on. The release script is `scripts/build/package-core-release.sh`.
@@ -38,10 +35,10 @@ go build -o bin/yggctl ./cmd/devctl
 ## Run
 
 ```bash
-./bin/yggdrasil-daemon
+make start
 ```
 
-Open `http://127.0.0.1:7331`.
+Open `http://127.0.0.1:7331`. `make help` lists the other targets.
 
 ## Test
 

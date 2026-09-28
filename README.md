@@ -1,5 +1,9 @@
 # Yggdrasil Core
 
+<p align="center">
+  <img src="docs/brand/yggdrasil-logo.png" alt="Yggdrasil" width="148">
+</p>
+
 > **Local AI should be as easy to use as SaaS AI.**
 
 **An open-source control plane that makes local AI feel like a hosted AI service.**
@@ -108,12 +112,10 @@ Go 1.26.3 or newer, Node.js 22, and pnpm 9.
 ```bash
 git clone https://github.com/yeixio/yggdrasil-core.git
 cd yggdrasil-core
-make frontend
-make daemon
-./bin/yggdrasil-daemon
+make start
 ```
 
-`make frontend` installs web dependencies, runs the web tests, and writes `web/dist`. The daemon serves that directory when it finds `index.html` there. A build from this tree reports `0.1.0-dev` unless the version is set with `-ldflags`. See [docs/development.md](docs/development.md).
+`make start` installs web dependencies, builds the UI, builds the daemon, and runs it. Open `http://127.0.0.1:7331`. `make help` lists the other targets. `make frontend` is the same UI build plus the web tests. A build from this tree reports `0.1.0-dev` unless the version is set with `-ldflags`. See [docs/development.md](docs/development.md).
 
 Dockerfiles in this repository are for development and the cluster check. Release archives are the packaged builds.
 
