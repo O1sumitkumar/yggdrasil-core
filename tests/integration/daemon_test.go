@@ -81,6 +81,31 @@ func TestDaemonHealthAndHardware(t *testing.T) {
 	if resp2.StatusCode != http.StatusOK {
 		t.Fatalf("version status %d", resp2.StatusCode)
 	}
+	var ver map[string]any
+	if err := json.NewDecoder(resp2.Body).Decode(&ver); err != nil {
+		t.Fatalf("decode version: %v", err)
+	}
+	src, _ := ver["source"].(string)
+	if ver["license"] != "AGPL-3.0-or-later" || src == "" {
+		t.Fatalf("version source offer: %#v", ver)
+	}
+
+	resp3, err := client.Get(base + "/source")
+	if err != nil {
+		t.Fatalf("source: %v", err)
+	}
+	defer resp3.Body.Close()
+	if resp3.StatusCode != http.StatusOK {
+		t.Fatalf("source status %d", resp3.StatusCode)
+	}
+	var offer map[string]any
+	if err := json.NewDecoder(resp3.Body).Decode(&offer); err != nil {
+		t.Fatalf("decode source: %v", err)
+	}
+	src, _ = offer["source"].(string)
+	if offer["name"] != "Yggdrasil Core" || offer["license"] != "AGPL-3.0-or-later" || src == "" {
+		t.Fatalf("source offer: %#v", offer)
+	}
 
 	// Settings survive restart path check: config file exists.
 	if _, err := filepath.Glob(filepath.Join(dir, "config.json")); err != nil {

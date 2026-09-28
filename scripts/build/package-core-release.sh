@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Build the core release artifacts: Linux deb and rpm, plus macOS archives for Homebrew.
+# Build the core release artifacts: Linux deb and rpm, macOS archives, and a Windows amd64 archive.
 # Usage: VERSION=1.1.0-beta.3 ./scripts/build/package-core-release.sh
+# Artifacts are not code-signed.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -93,10 +94,26 @@ package_darwin() {
   rm -rf "$stage"
 }
 
+package_windows() {
+  local goarch="$1"
+  local name="yggdrasil-${VERSION}-windows-${goarch}-headless"
+  local stage="dist/${name}"
+  mkdir -p "$stage/web"
+  echo "Building windows/${goarch}"
+  CGO_ENABLED=0 GOOS=windows GOARCH="$goarch" go build -trimpath -ldflags "$LDFLAGS" \
+    -o "$stage/yggdrasil-daemon.exe" ./cmd/daemon
+  CGO_ENABLED=0 GOOS=windows GOARCH="$goarch" go build -trimpath -ldflags "$LDFLAGS" \
+    -o "$stage/yggctl.exe" ./cmd/devctl
+  cp -R web/dist/. "$stage/web/"
+  tar -C dist -czf "dist/${name}.tar.gz" "$name"
+  rm -rf "$stage"
+}
+
 package_linux amd64 amd64 x86_64
 package_linux arm64 arm64 aarch64
 package_darwin arm64
 package_darwin amd64
+package_windows amd64
 
 (
   cd dist

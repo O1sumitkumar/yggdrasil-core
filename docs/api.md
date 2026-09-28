@@ -1,0 +1,125 @@
+# API
+
+The daemon listens on `http://127.0.0.1:7331` unless `config.json` or `YGGDRASIL_API_HOST` / `YGGDRASIL_API_PORT` say otherwise. A machine-readable description of the control-plane routes is [api/openapi.yaml](../api/openapi.yaml). This page records behavior that matters when you call the server.
+
+## Authentication
+
+Loopback binds (`127.0.0.1`, `::1`, `localhost`) do not require an API key. Any other API host, including `0.0.0.0` and `::`, requires `Authorization: Bearer YOUR_API_KEY` on every `/api/v1/*` and `/v1/*` request. The daemon refuses to listen on a non-loopback address until at least one API key exists. `GET /about` and `GET /source` stay open so a network user can obtain the corresponding source.
+
+The web UI calls this setting local network access. Turning it on stores `api_host` as `0.0.0.0` and turns the key check on immediately. The process keeps the socket it bound at startup until it is restarted, so quit and reopen Yggdrasil before other computers can connect. The daemon also rejects a settings change that enables that bind when no key exists.
+
+Create a key from the web UI or `POST /api/v1/api-keys`. The response includes the secret once. The database stores a bcrypt hash and a prefix. The plaintext key is not written to disk. Revoke with `DELETE /api/v1/api-keys/{id}` and rotate with `POST /api/v1/api-keys/{id}/rotate`. Do not put the key in a URL or query string. Those requests are rejected.
+
+`YGGDRASIL_API_KEY`, when set, is hashed at startup if that secret is not already valid. The Docker image binds `0.0.0.0` and will not start until that variable is set or a key is already in the data directory. The cluster compose file sets a local test key for that reason.
+
+A bearer token on plain HTTP does not encrypt traffic. It stops anonymous use of a trusted LAN. TLS or mTLS for remote access is not implemented.
+
+Bifrost, on port 7332, is a separate server. Its protected routes require a paired-node token. Pairing routes are intentionally callable before trust exists. See [clustering.md](clustering.md).
+
+## Corresponding source
+
+`GET /about` and `GET /source` return the same JSON and do not require an API key:
+
+```json
+{
+  "name": "Yggdrasil Core",
+  "version": "1.2.0-beta.3",
+  "commit": "abc1234",
+  "license": "AGPL-3.0-or-later",
+  "source": "https://github.com/yeixio/yggdrasil-core/tree/v1.2.0-beta.3"
+}
+```
+
+`GET /api/v1/version` includes `license` and `source` as well. The Settings page links to that source URL.
+
+A release build, which sets `version.Version` from the tag, points `source` at `https://github.com/yeixio/yggdrasil-core/tree/v<version>`. A development build with a known commit points at `.../tree/<commit>`. A build with neither points at the repository itself.
+
+If you distribute or operate a modified Yggdrasil Core over a network, set the source URL so users can obtain the corresponding source for your modified version:
+
+```text
+-X github.com/yeixio/yggdrasil-core/internal/version.SourceURL=<url-of-your-corresponding-source>
+```
+
+The same text is printed by `yggdrasil-daemon -version` and by `yggctl version` or `yggctl about`.
+
+## Control plane
+
+Prefix: `/api/v1`
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/health` | Process is up |
+| GET | `/version` | Version, commit, license, and corresponding source |
+| GET | `/hardware` | Host inventory |
+| GET | `/models` | Catalog and installed models |
+| POST | `/models/{id}/install` | Install a catalog model |
+| POST | `/models/install-from-url` | Install a GGUF from a URL |
+| POST | `/models/{id}/start` | Load a model |
+| POST | `/models/{id}/stop` | Stop a model |
+| GET | `/runtimes` | Registered runtimes and detection |
+| POST | `/runtimes/{id}/install` | Install a runtime (`llamacpp`) |
+| GET, POST | `/profiles` | List or create profiles |
+| POST | `/chat` | Chat through a profile |
+| GET, POST | `/tasks` | Orchestration tasks |
+| GET | `/nodes` | This computer and peers |
+| POST | `/nodes/pair` | Start pairing |
+| POST | `/nodes/{id}/pair/approve` | Approve a pairing offer |
+| GET, POST | `/api-keys` | List metadata or create a key |
+| GET, PATCH | `/settings` | Read or update settings |
+| GET | `/diagnostics` | Diagnostic bundle |
+| GET | `/events` | Server-sent event stream |
+| GET, POST | `/benchmarks` | List or start a benchmark |
+
+Model, node, tool, conversation, and log routes follow the same prefix. The OpenAPI file is the route list to diff when a handler changes.
+
+## OpenAI-compatible API
+
+Implemented routes:
+
+| Method | Path |
+| --- | --- |
+| GET | `/v1/models` |
+| POST | `/v1/chat/completions` |
+
+No other `/v1` routes are registered. Embeddings, image generation, and the legacy completions API are not implemented.
+
+### `GET /v1/models`
+
+Returns profiles, not raw files on disk:
+
+```json
+{
+  "object": "list",
+  "data": [
+    {"id": "profile:general-assistant", "object": "model", "owned_by": "yggdrasil"}
+  ]
+}
+```
+
+Built-in profile ids include `general-assistant`, `programming`, and `research`.
+
+### `POST /v1/chat/completions`
+
+```json
+{
+  "model": "profile:general-assistant",
+  "messages": [{"role": "user", "content": "Hello"}],
+  "stream": false
+}
+```
+
+`model` may be `profile:<id>` or a bare id. A bare id is used as a profile id when that profile exists, and otherwise as a model override.
+
+### Streaming
+
+`"stream": true` responds with `Content-Type: text/event-stream`. Each event is `data: {json}` and the stream ends with `data: [DONE]`.
+
+### Known differences
+
+- Only the last message with `"role": "user"` is sent into the chat path. Earlier turns, system prompts, and assistant messages in the same request are not forwarded.
+- `temperature` and `max_tokens` are accepted and ignored.
+- Tool definitions in the OpenAI request are not passed through. Tool use is controlled by the Yggdrasil profile.
+- The non-streaming `id` is the fixed string `chatcmpl-ygg`.
+- A model must already be installed and startable. The HTTP call does not download one for you.
+
+Examples that match this behavior are in [examples/](../examples/).

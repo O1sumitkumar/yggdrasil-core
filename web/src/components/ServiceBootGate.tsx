@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState, type ReactNode } from 'react'
-import { api } from '@/lib/api'
+import { ApiError, api, rememberApiKey } from '@/lib/api'
 import { readScreenshotLaunch } from '@/lib/screenshotMode'
 
 const BOOT_GIVE_UP_MS = 25_000
@@ -74,9 +74,14 @@ export function ServiceBootGate({ children }: { children: ReactNode }) {
   return <DaemonBootGate>{children}</DaemonBootGate>
 }
 
+function needsApiKey(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 401 || error.code === 'UNAUTHORIZED')
+}
+
 function DaemonBootGate({ children }: { children: ReactNode }) {
   const [deadline, setDeadline] = useState(() => Date.now() + BOOT_GIVE_UP_MS)
   const [timedOut, setTimedOut] = useState(false)
+  const [keyDraft, setKeyDraft] = useState('')
 
   const healthQuery = useQuery({
     queryKey: ['health'],
@@ -87,14 +92,15 @@ function DaemonBootGate({ children }: { children: ReactNode }) {
       }
       return health
     },
-    retry: true,
+    retry: (_count, error) => !needsApiKey(error),
     retryDelay: (attempt) => Math.min(400 + attempt * 250, 2000),
     refetchInterval: (query) =>
-      query.state.data?.status === 'ok' ? 15_000 : 1_000,
+      query.state.data?.status === 'ok' ? 15_000 : needsApiKey(query.state.error) ? false : 1_000,
     refetchOnWindowFocus: true,
   })
 
   const ready = healthQuery.data?.status === 'ok'
+  const askForKey = needsApiKey(healthQuery.error)
 
   useEffect(() => {
     if (ready) {
@@ -111,6 +117,49 @@ function DaemonBootGate({ children }: { children: ReactNode }) {
 
   if (ready) {
     return <div className="h-full min-h-0 min-w-0 overflow-hidden">{children}</div>
+  }
+
+  if (askForKey) {
+    return (
+      <form
+        className="flex h-full min-h-0 flex-col items-center justify-center bg-canvas px-6 text-center"
+        onSubmit={(event) => {
+          event.preventDefault()
+          const secret = keyDraft.trim()
+          if (!secret) return
+          rememberApiKey(secret)
+          setKeyDraft('')
+          void healthQuery.refetch()
+        }}
+      >
+        <img
+          src="/yggdrasil-mark.png"
+          alt=""
+          width={64}
+          height={64}
+          className="h-16 w-16 object-contain"
+          decoding="async"
+        />
+        <h1 className="mt-6 font-display text-2xl font-semibold tracking-tight text-ink">
+          API key required
+        </h1>
+        <p className="mt-2 max-w-md text-sm leading-relaxed text-ink-muted">
+          This Yggdrasil daemon is listening beyond this computer. Enter an API key to continue.
+          A key does not encrypt traffic on plain HTTP.
+        </p>
+        <input
+          type="password"
+          autoComplete="off"
+          value={keyDraft}
+          onChange={(event) => setKeyDraft(event.target.value)}
+          placeholder="ygg_…"
+          className="field mt-6 w-full max-w-md"
+        />
+        <button type="submit" className="btn-primary mt-4" disabled={!keyDraft.trim() || healthQuery.isFetching}>
+          Continue
+        </button>
+      </form>
+    )
   }
 
   if (timedOut) {

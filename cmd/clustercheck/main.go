@@ -368,7 +368,12 @@ func mustPOST(url string, payload any) map[string]any {
 }
 
 func get(url string) (int, string) {
-	resp, err := http.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return 0, err.Error()
+	}
+	applyControlAuth(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return 0, err.Error()
 	}
@@ -398,6 +403,7 @@ func doJSON(method, url string, payload any) (int, string) {
 		return 0, err.Error()
 	}
 	req.Header.Set("Content-Type", "application/json")
+	applyControlAuth(req)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return 0, err.Error()
@@ -405,6 +411,15 @@ func doJSON(method, url string, payload any) (int, string) {
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, string(b)
+}
+
+func applyControlAuth(req *http.Request) {
+	if strings.Contains(req.URL.Path, "/internal/") {
+		return
+	}
+	if key := strings.TrimSpace(os.Getenv("YGGDRASIL_API_KEY")); key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
 }
 
 func env(k, def string) string {

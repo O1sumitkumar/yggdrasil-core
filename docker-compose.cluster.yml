@@ -11,6 +11,7 @@ services:
       YGGDRASIL_INTERNAL_HOST: "0.0.0.0"
       YGGDRASIL_DISCOVERY_ENABLED: "true"
       YGGDRASIL_STUB_INFERENCE: "true"
+      YGGDRASIL_API_KEY: "ygg_cluster_local_test_key"
     volumes:
       - a-data:/data
     networks: [cluster]
@@ -27,6 +28,7 @@ services:
       YGGDRASIL_INTERNAL_HOST: "0.0.0.0"
       YGGDRASIL_DISCOVERY_ENABLED: "true"
       YGGDRASIL_STUB_INFERENCE: "true"
+      YGGDRASIL_API_KEY: "ygg_cluster_local_test_key"
     volumes:
       - b-data:/data
     networks: [cluster]
@@ -43,6 +45,7 @@ services:
       YGGDRASIL_INTERNAL_HOST: "0.0.0.0"
       YGGDRASIL_DISCOVERY_ENABLED: "true"
       YGGDRASIL_STUB_INFERENCE: "true"
+      YGGDRASIL_API_KEY: "ygg_cluster_local_test_key"
     volumes:
       - c-data:/data
     networks: [cluster]
@@ -55,6 +58,7 @@ services:
       NODE_B_URL: http://node-b:7331
       NODE_C_URL: http://node-c:7331
       NODE_B_INTERNAL: http://node-b:7332
+      YGGDRASIL_API_KEY: "ygg_cluster_local_test_key"
     depends_on:
       - node-a
       - node-b

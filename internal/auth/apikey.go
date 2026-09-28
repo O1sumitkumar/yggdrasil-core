@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -58,10 +59,39 @@ func (m *APIKeyManager) Create(ctx context.Context, name string) (record APIKeyR
 	if err != nil {
 		return record, "", err
 	}
-	if err := m.secrets.Write("apikey-"+id, secret); err != nil {
-		return record, "", err
-	}
 	return APIKeyRecord{ID: id, Name: name, Prefix: prefix, CreatedAt: now}, secret, nil
+}
+
+// Adopt hashes a caller-supplied key when that key is not already valid.
+// The plaintext is returned to the caller and is not written to disk.
+func (m *APIKeyManager) Adopt(ctx context.Context, name, secret string) (APIKeyRecord, error) {
+	secret = strings.TrimSpace(secret)
+	if secret == "" {
+		return APIKeyRecord{}, fmt.Errorf("api key is empty")
+	}
+	if len(secret) < 12 {
+		return APIKeyRecord{}, fmt.Errorf("api key is too short")
+	}
+	if rec, err := m.Verify(ctx, secret); err == nil {
+		return rec, nil
+	}
+	if name == "" {
+		name = "default"
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.DefaultCost)
+	if err != nil {
+		return APIKeyRecord{}, err
+	}
+	id := uuid.NewString()
+	prefix := secret[:12]
+	now := time.Now().UTC()
+	_, err = m.db.ExecContext(ctx, `
+		INSERT INTO api_keys (id, name, key_prefix, key_hash, created_at)
+		VALUES (?, ?, ?, ?, ?)`, id, name, prefix, string(hash), now.Format(time.RFC3339Nano))
+	if err != nil {
+		return APIKeyRecord{}, err
+	}
+	return APIKeyRecord{ID: id, Name: name, Prefix: prefix, CreatedAt: now}, nil
 }
 
 // Verify checks a presented API key.

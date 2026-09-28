@@ -1,0 +1,110 @@
+# Canonical GitHub label definitions for Yggdrasil Core.
+# Colors are six-digit hex values without '#'.
+
+- name: bug
+  color: d73a4a
+  description: Something is not working correctly
+
+- name: enhancement
+  color: a2eeef
+  description: New feature or improvement
+
+- name: documentation
+  color: 0075ca
+  description: Documentation changes or improvements
+
+- name: security
+  color: b60205
+  description: Security-related work
+
+- name: performance
+  color: fbca04
+  description: Performance, latency, memory, or resource usage
+
+- name: hardware
+  color: 7057ff
+  description: Hardware support or compatibility
+
+- name: runtime
+  color: 5319e7
+  description: AI runtime or backend integration
+
+- name: orchestration
+  color: c5def5
+  description: Scheduling, routing, agents, or orchestration
+
+- name: networking
+  color: 1d76db
+  description: Networking, discovery, pairing, or connectivity
+
+- name: api
+  color: 0e8a16
+  description: Control API or OpenAI-compatible API
+
+- name: cli
+  color: 0052cc
+  description: yggctl and other command-line tools
+
+- name: good first issue
+  color: 7057ff
+  description: Good issue for a new contributor
+
+- name: help wanted
+  color: 008672
+  description: Maintainers would welcome community help
+
+- name: needs triage
+  color: ededed
+  description: Needs initial maintainer review
+
+- name: needs reproduction
+  color: f9d0c4
+  description: Needs a reliable reproduction
+
+- name: question
+  color: d876e3
+  description: More information or discussion is needed
+
+- name: blocked
+  color: bfdadc
+  description: Blocked by another issue, dependency, or decision
+
+- name: macos
+  color: e5e5e5
+  description: macOS-specific
+
+- name: windows
+  color: 0078d4
+  description: Windows-specific
+
+- name: linux
+  color: fcc624
+  description: Linux-specific
+
+- name: apple-silicon
+  color: aaaaaa
+  description: Apple Silicon hardware
+
+- name: amd
+  color: ed1c24
+  description: AMD hardware or software support
+
+- name: nvidia
+  color: 76b900
+  description: NVIDIA hardware or CUDA support
+
+- name: intel
+  color: 0071c5
+  description: Intel hardware or software support
+
+- name: bifrost
+  color: 2ca8c2
+  description: Bifrost networking and node discovery
+
+- name: norn
+  color: 8b5cf6
+  description: Norn scheduling and workload placement
+
+- name: heimdall
+  color: d8a657
+  description: Heimdall monitoring, health, and diagnostics

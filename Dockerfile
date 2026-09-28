@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/yggdrasil-daemon /usr/local/bin/yggdrasil-daemon
 COPY --from=build /out/clustercheck /usr/local/bin/clustercheck
+# The image listens beyond loopback, so the daemon refuses to start until
+# YGGDRASIL_API_KEY is set or an API key already exists in the data directory.
 ENV YGGDRASIL_API_HOST=0.0.0.0 \
     YGGDRASIL_INTERNAL_HOST=0.0.0.0 \
     YGGDRASIL_DISCOVERY_ENABLED=true

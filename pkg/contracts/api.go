@@ -27,6 +27,8 @@ type VersionResponse struct {
 	Commit    string `json:"commit"`
 	BuildDate string `json:"build_date"`
 	Product   string `json:"product"`
+	License   string `json:"license"`
+	Source    string `json:"source"`
 }
 
 // CPUInfo describes the host CPU.

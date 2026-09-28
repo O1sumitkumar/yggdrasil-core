@@ -17,7 +17,7 @@
       "path": "/models",
       "filename": "02-models.png",
       "headline": "Manage Every Model",
-      "readyText": "Gemma 4 E4B"
+      "readyText": "Best overall"
     },
     {
       "id": "computers",
@@ -45,7 +45,7 @@
       "path": "/api-access",
       "filename": "06-api-manager.png",
       "headline": "Manage Local AI APIs",
-      "readyText": "API keys"
+      "readyText": "Running"
     }
   ]
 }

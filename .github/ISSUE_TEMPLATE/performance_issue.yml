@@ -1,0 +1,107 @@
+name: Performance
+description: Report speed or memory behavior that looks wrong for the hardware.
+title: "[Performance]: "
+labels: ["performance"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Benchmark results vary substantially with the model, quantization, runtime, context length, and whatever else is using the machine.
+        Include those details so the report can be compared with another setup.
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected performance
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed performance
+    validations:
+      required: true
+  - type: input
+    id: tokens
+    attributes:
+      label: Tokens/sec
+    validations:
+      required: false
+  - type: input
+    id: ttft
+    attributes:
+      label: Time to first token
+    validations:
+      required: false
+  - type: input
+    id: model
+    attributes:
+      label: Model
+    validations:
+      required: true
+  - type: input
+    id: quantization
+    attributes:
+      label: Quantization
+      placeholder: GGUF Q4_K_M
+    validations:
+      required: true
+  - type: input
+    id: context
+    attributes:
+      label: Context length
+    validations:
+      required: false
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime/backend
+      placeholder: llamacpp, metal, vulkan, cpu
+    validations:
+      required: true
+  - type: input
+    id: cpu
+    attributes:
+      label: CPU
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU
+    validations:
+      required: true
+  - type: input
+    id: memory
+    attributes:
+      label: RAM/VRAM
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+    validations:
+      required: true
+  - type: dropdown
+    id: topology
+    attributes:
+      label: Single/multi-node
+      options:
+        - Single-node
+        - Multi-node
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: other-load
+    attributes:
+      label: Other applications consuming resources
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Remove API keys, tokens, personal data, private URLs, and credentials.
+    validations:
+      required: false

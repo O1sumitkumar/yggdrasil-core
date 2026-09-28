@@ -1,46 +1,56 @@
 {
   "schemaVersion": 1,
   "title": "Yggdrasil",
-  "description": "Talk to local models, search the web, read files, and use the computers you already have. Yggdrasil is the desktop app that keeps that simple.",
-  "layoutDescription": "Yggdrasil runs local models on the computers you already own, with a normal chat, web and file tools, and a desktop app for Mac, Windows, and Linux.",
-  "footer": "A local AI control plane from Yeix.",
-  "issuesLabel": "Bugs and ideas",
+  "description": "Run private AI on the hardware you already own. Yggdrasil Desktop is the packaged app. Yggdrasil Core is the open-source engine behind it.",
+  "layoutDescription": "Yggdrasil Desktop is the packaged local-AI app. Yggdrasil Core is the open-source headless engine: a daemon, a local web UI, and an HTTP API.",
+  "footer": "Yggdrasil Desktop and Yggdrasil Core, from Yeix.",
+  "issuesLabel": "Core issues",
   "about": {
-    "eyebrow": "Local AI control plane",
-    "headline": "Your computers. Your models. A chat that just answers.",
-    "lead": "Yggdrasil is a desktop app for Mac, Windows, and Linux. It runs models on the machines you already have, searches the web and reads files when that helps, and stays a conversation instead of a toolchain.",
+    "eyebrow": "Local AI",
+    "headline": "Your computers. Your models. Your AI.",
+    "lead": "Run private AI on the hardware you already own. Yggdrasil recommends models that fit, connects your computers, and handles the infrastructure so you can just use it.",
     "highlights": [
       {
         "title": "Stays on your machines",
-        "text": "The daemon runs locally. The web stays off until you turn Internet on."
+        "text": "The daemon runs locally. Web access stays off until you enable Internet tools."
       },
       {
-        "title": "Tools without the protocol",
+        "title": "Tools without the clutter",
         "text": "Search, pages, files, shell, and git show up as status, not JSON in the reply."
       },
       {
-        "title": "A build for each release",
-        "text": "Deb, rpm, apt, and Homebrew packages are published from the core release."
+        "title": "An open engine",
+        "text": "Yggdrasil Core is AGPL-3.0-or-later. Desktop is a separate product and is not in the Core packages."
       }
     ],
     "shots": [
       {
-        "src": "/yggdrasil/chat.jpg",
+        "src": "/yggdrasil/01-chat.png",
         "title": "A normal chat",
         "text": "Ask in plain language. Answers come back as Markdown, and a web search shows up as a short status instead of raw tool syntax."
       },
       {
-        "src": "/yggdrasil/models.jpg",
+        "src": "/yggdrasil/02-models.png",
         "title": "Models you can actually run",
         "text": "See what fits this computer, install it, and let Automatic pick one that can use tools when the question needs live information."
       },
       {
-        "src": "/yggdrasil/computers.jpg",
+        "src": "/yggdrasil/03-computers.png",
         "title": "More than one computer",
         "text": "Pair machines on your network and let a harder job use another computer you already own."
       },
       {
-        "src": "/yggdrasil/api.jpg",
+        "src": "/yggdrasil/04-performance.png",
+        "title": "What the computers are doing",
+        "text": "See memory, the model that is running, and how fast this computer is answering."
+      },
+      {
+        "src": "/yggdrasil/05-diagnostics.png",
+        "title": "A health check you can read",
+        "text": "Heimdall shows whether the service, runtime, database, and paired computers are working."
+      },
+      {
+        "src": "/yggdrasil/06-api-manager.png",
         "title": "A local API when you want one",
         "text": "The same daemon speaks an OpenAI-compatible API on this machine. LAN access stays off until you turn it on."
       }
@@ -48,9 +58,9 @@
   },
   "download": {
     "title": "Download",
-    "description": "Install Yggdrasil core with Homebrew, apt, deb, or rpm.",
-    "intro": "These are the core packages. macOS installs with Homebrew. Debian and Ubuntu install with apt. RPM packages are on the release.",
-    "empty": "No core packages are listed right now.",
-    "issuesPrompt": "Found a bug or want something added?"
+    "description": "Yggdrasil Desktop is the packaged app. This page lists Yggdrasil Core packages: headless archives, apt, deb, and rpm.",
+    "intro": "Yggdrasil Desktop is not in this list. The files below are Yggdrasil Core, the open-source engine. macOS Core builds are headless archives. Debian and Ubuntu can use apt. Homebrew is not an install path yet.",
+    "empty": "No Core packages are listed right now.",
+    "issuesPrompt": "Found a bug in Core or want something added?"
   }
 }

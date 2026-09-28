@@ -1,11 +1,14 @@
 ## Install
 
-macOS:
+macOS. Homebrew support is coming soon. Use the headless archive attached to this release.
 
 ```bash
-brew tap yeixio/yggdrasil https://github.com/yeixio/yggdrasil-core
-brew install yggdrasil
+tar -xzf yggdrasil-*-darwin-*-headless.tar.gz
+cd yggdrasil-*-darwin-*-headless
+./yggdrasil-daemon
 ```
+
+Open `http://127.0.0.1:7331`.
 
 Debian and Ubuntu:
 
@@ -16,3 +19,13 @@ sudo apt-get install yggdrasil
 ```
 
 RPM packages for x86_64 and aarch64 are attached to this release. Install one with `sudo rpm -i` or `sudo dnf install`.
+
+Windows amd64. The headless archive attached to this release is not code-signed.
+
+```bash
+tar -xzf yggdrasil-*-windows-amd64-headless.tar.gz
+cd yggdrasil-*-windows-amd64-headless
+./yggdrasil-daemon.exe
+```
+
+Open `http://127.0.0.1:7331`.

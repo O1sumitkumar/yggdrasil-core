@@ -22,7 +22,8 @@ frontend:
 	cd web && pnpm install && pnpm test && pnpm build
 
 daemon:
-	go build -o bin/yggdrasil-daemon ./cmd/daemon
+	go build -ldflags "-X github.com/yeixio/yggdrasil-core/internal/version.Commit=$$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" -o bin/yggdrasil-daemon ./cmd/daemon
+	go build -ldflags "-X github.com/yeixio/yggdrasil-core/internal/version.Commit=$$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" -o bin/yggctl ./cmd/devctl
 
 run-daemon: daemon
 	./bin/yggdrasil-daemon

@@ -706,6 +706,21 @@ export function SettingsPage() {
                   Build {versionQuery.data.commit.slice(0, 7)}
                 </p>
               ) : null}
+              {versionQuery.data?.source ? (
+                <p className="mt-2 text-sm">
+                  <a
+                    href={versionQuery.data.source}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary underline-offset-2 hover:underline"
+                  >
+                    Corresponding source
+                  </a>
+                  {versionQuery.data.license ? (
+                    <span className="text-ink-muted"> · {versionQuery.data.license}</span>
+                  ) : null}
+                </p>
+              ) : null}
             </div>
           </div>
           <dl className="space-y-3 border-t border-line/50 pt-4 text-sm">

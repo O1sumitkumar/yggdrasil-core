@@ -1,8 +1,8 @@
 # Two-machine Team demo — test plan
 
-Manual acceptance for the MVP cluster demo: one Chat turn runs a **Team** pipeline across two paired computers, and the UI shows which machine ran each role.
+Manual acceptance for a two-computer demo: one Chat turn runs a **Team** pipeline across two paired computers, and the UI shows which machine ran each role.
 
-Matches [PLAN_MVP.md](../PLAN_MVP.md) § Milestone 7 “MVP demo acceptance scenario”.
+See [Clustering](clustering.md) for how discovery, pairing, and placement work.
 
 ## Goal
 

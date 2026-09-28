@@ -4,19 +4,19 @@
       "id": "overview",
       "title": "What Yggdrasil does",
       "paragraphs": [
-        "Yggdrasil runs local AI models through a desktop app or a browser connected to its daemon. It manages the llama.cpp runtime, model downloads, chat, tools, and trusted computers on your local network. You do not need a hosted model account for local inference.",
-        "Desktop packages target Apple silicon macOS, Windows x64, and Linux x64. Linux headless packages target x64 and ARM64. Mobile controllers, an MCP marketplace, and custom orchestrator management are not included."
+        "Yggdrasil Desktop is the packaged app. Yggdrasil Core is the open-source engine behind it: a daemon, a local web UI, and an HTTP API. Both run local models on computers you already own. You do not need a hosted model account for local inference.",
+        "This Core release publishes headless archives and Linux deb and rpm packages. Those files are not the Desktop application, and they are not code-signed. Mobile controllers, an MCP marketplace, and custom orchestrator management are not included."
       ]
     },
     {
       "id": "install",
       "title": "Install and start your first chat",
       "paragraphs": [
-        "Choose the archive for your operating system and processor from this version\u2019s release page. The release includes SHA256SUMS.txt for checking downloaded files. macOS release builds are signed and notarized; Windows builds are unsigned.",
-        "On macOS, extract and open Yggdrasil.app. On Windows, extract the whole archive before launching the app. On Linux, keep the app beside yggdrasil-daemon; the desktop requires GTK 3 and WebKitGTK 4.1. Use the headless package for a server without a graphical desktop."
+        "Yggdrasil Desktop is distributed separately from this Core release. Use the official desktop channels for the packaged app. This page’s release files are Yggdrasil Core. Verify them against SHA256SUMS.txt. Core archives are not code-signed.",
+        "For Core, use the headless archive for your operating system and processor, or a Linux deb or rpm package. The daemon serves a web UI at http://127.0.0.1:7331. Homebrew is not an install path for this release."
       ],
       "steps": [
-        "Launch Yggdrasil and follow the hardware and model setup. Allow enough disk space for model files and the managed runtime. The first model and runtime download require internet access.",
+        "Open http://127.0.0.1:7331, or open Yggdrasil Desktop if you installed it separately. Follow the hardware and model setup. Allow enough disk space for model files and the managed runtime. The first model and runtime download require internet access.",
         "Open Models and install a model suitable for this computer. Wait for installation to finish.",
         "Open Chat, choose General Assistant and the installed model, and send a short prompt. The initial response can take longer while the runtime loads the model.",
         "Find your app version in the sidebar or Settings and match it to the documentation version above."

@@ -1,0 +1,81 @@
+name: Runtime request
+description: Ask for another inference runtime or backend.
+title: "[Runtime]: "
+labels: ["runtime", "enhancement"]
+body:
+  - type: input
+    id: name
+    attributes:
+      label: Runtime/backend name
+    validations:
+      required: true
+  - type: input
+    id: url
+    attributes:
+      label: Project URL
+      description: Upstream project page, if there is one.
+    validations:
+      required: false
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Supported hardware
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it is useful to Yggdrasil
+    validations:
+      required: true
+  - type: dropdown
+    id: openai
+    attributes:
+      label: OpenAI-compatible API?
+      options:
+        - Yes
+        - No
+        - Partial
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: native
+    attributes:
+      label: Native library/API?
+      options:
+        - Yes
+        - No
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: platforms
+    attributes:
+      label: Platforms
+      description: Operating systems and CPU architectures the runtime supports.
+    validations:
+      required: true
+  - type: input
+    id: license
+    attributes:
+      label: Licensing
+      placeholder: MIT, Apache-2.0, GPL-3.0
+    validations:
+      required: false
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Willing to contribute implementation?
+      options:
+        - Yes
+        - No
+        - Maybe
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional information
+    validations:
+      required: false

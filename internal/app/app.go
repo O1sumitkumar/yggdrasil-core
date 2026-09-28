@@ -331,9 +331,11 @@ func New(opts Options) (*App, error) {
 			return (&logs.Store{Dir: a.Config.Get().LogsDir}).ReadTail(name, tailBytes)
 		},
 		Version: func() contracts.VersionResponse {
+			offer := version.CurrentOffer()
 			return contracts.VersionResponse{
-				Version: version.Version, Commit: version.Commit,
+				Version: offer.Version, Commit: offer.Commit,
 				BuildDate: version.BuildDate, Product: "Yggdrasil",
+				License: offer.License, Source: offer.Source,
 			}
 		},
 		ListModels: a.listModelsCluster,
@@ -415,6 +417,7 @@ func New(opts Options) (*App, error) {
 		CreateAPIKey: apiKeyMgr.Create,
 		RevokeAPIKey: apiKeyMgr.Revoke,
 		RotateAPIKey: apiKeyMgr.Rotate,
+		VerifyAPIKey: apiKeyMgr.Verify,
 		Chat: func(w http.ResponseWriter, r *http.Request, conversationID, profileID, modelID, message string, stream bool, execution string) error {
 			return a.HandleHTTPChat(w, r, conversationID, profileID, modelID, message, stream, execution)
 		},
@@ -479,17 +482,42 @@ func (a *App) detectHardware(ctx context.Context) (contracts.HardwareInventory, 
 }
 
 func (a *App) openAIAuth(r *http.Request) error {
-	cfg := a.Config.Get()
-	if !cfg.LANAPIEnabled {
+	return a.authorizeControlRequest(r)
+}
+
+func (a *App) authorizeControlRequest(r *http.Request) error {
+	if !config.ListensBeyondLoopback(a.Config.Get().APIHost) {
 		return nil
 	}
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		return fmt.Errorf("authorization required")
+	token, err := auth.BearerToken(r)
+	if err != nil {
+		return err
 	}
-	token := strings.TrimPrefix(authHeader, "Bearer ")
 	if _, err := a.APIKeys.Verify(r.Context(), token); err != nil {
 		return err
+	}
+	return nil
+}
+
+// requireKeyForRemoteBind refuses a non-loopback control API with no key.
+// YGGDRASIL_API_KEY, when set, is hashed and stored if it is not already valid.
+func (a *App) requireKeyForRemoteBind(ctx context.Context) error {
+	cfg := a.Config.Get()
+	if !config.ListensBeyondLoopback(cfg.APIHost) {
+		return nil
+	}
+	if supplied := strings.TrimSpace(os.Getenv("YGGDRASIL_API_KEY")); supplied != "" {
+		if _, err := a.APIKeys.Adopt(ctx, "bootstrap", supplied); err != nil {
+			return fmt.Errorf("configure API key: %w", err)
+		}
+		return nil
+	}
+	keys, err := a.APIKeys.List(ctx)
+	if err != nil {
+		return err
+	}
+	if len(keys) == 0 {
+		return fmt.Errorf("%w (api host %s)", auth.ErrAPIKeyRequired, cfg.APIHost)
 	}
 	return nil
 }
@@ -499,6 +527,9 @@ func (a *App) Start(ctx context.Context) error {
 	ctx, a.cancel = context.WithCancel(ctx)
 	_ = a.syncInternalBind()
 	cfg := a.Config.Get()
+	if err := a.requireKeyForRemoteBind(ctx); err != nil {
+		return err
+	}
 	if cfg.DiscoveryEnabled && (cfg.InternalHost == "" || cfg.InternalHost == "127.0.0.1" || cfg.InternalHost == "localhost") {
 		_ = a.Config.Update(func(c *config.Config) { c.InternalHost = "0.0.0.0" })
 		cfg = a.Config.Get()
@@ -758,6 +789,15 @@ func (a *App) applySettingsPatch(ctx context.Context, patch map[string]any) erro
 
 	var discoveryTouched bool
 	var discoveryEnabled bool
+	if v, ok := patch["lan_api_enabled"].(bool); ok && v {
+		keys, err := a.APIKeys.List(ctx)
+		if err != nil {
+			return err
+		}
+		if len(keys) == 0 {
+			return auth.ErrAPIKeyRequired
+		}
+	}
 	err := a.Config.Update(func(c *config.Config) {
 		if v, ok := patch["node_name"].(string); ok && v != "" {
 			c.NodeName = v

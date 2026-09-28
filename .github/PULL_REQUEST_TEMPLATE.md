@@ -1,0 +1,46 @@
+## What changed?
+
+## Why?
+
+## Related issue
+
+Fixes #
+
+## Testing
+
+- [ ] Unit tests
+- [ ] Integration tests
+- [ ] Manual testing
+- [ ] Existing tests pass
+
+## Platforms tested
+
+- [ ] macOS
+- [ ] Windows
+- [ ] Linux
+- [ ] Not platform-specific
+
+## Hardware tested
+
+CPU:
+
+GPU:
+
+RAM/VRAM:
+
+## Breaking changes
+
+## Security implications
+
+## Documentation updated
+
+## Checklist
+
+The agreement is [CLA.md](../CLA.md).
+
+- [ ] I agree to the Yggdrasil Contributor License Agreement.
+- [ ] Code formatted
+- [ ] Tests added/updated where appropriate
+- [ ] No secrets or personal data included
+- [ ] Public APIs documented
+- [ ] Relevant docs updated

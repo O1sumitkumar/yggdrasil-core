@@ -1,4 +1,4 @@
-import { getApiBase } from '@/lib/api'
+import { getApiBase, storedApiKey } from '@/lib/api'
 import type { YggdrasilEvent } from '@/types/api'
 
 export interface EventSubscriptionOptions {
@@ -57,6 +57,10 @@ export function subscribeEvents({
   }
 
   const url = `${getApiBase()}/api/v1/events`
+  const key = storedApiKey()
+  if (key) {
+    return subscribeEventsWithBearer(url, key, { onEvent, onError, onOpen })
+  }
   const source = new EventSource(url)
 
   source.onopen = () => {
@@ -87,4 +91,51 @@ export function subscribeEvents({
   return () => {
     source.close()
   }
+}
+
+function subscribeEventsWithBearer(
+  url: string,
+  key: string,
+  { onEvent, onError, onOpen }: EventSubscriptionOptions,
+): () => void {
+  const controller = new AbortController()
+  void (async () => {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          Accept: 'text/event-stream',
+          Authorization: `Bearer ${key}`,
+        },
+        signal: controller.signal,
+      })
+      if (!response.ok || !response.body) {
+        onError?.(new Event('error'))
+        return
+      }
+      onOpen?.()
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      while (!controller.signal.aborted) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const frames = buffer.split('\n\n')
+        buffer = frames.pop() ?? ''
+        for (const frame of frames) {
+          const data = frame
+            .split('\n')
+            .filter((line) => line.startsWith('data:'))
+            .map((line) => line.slice(5).trimStart())
+            .join('\n')
+          if (!data) continue
+          const event = parseEventData(data)
+          if (event) onEvent(event)
+        }
+      }
+    } catch {
+      if (!controller.signal.aborted) onError?.(new Event('error'))
+    }
+  })()
+  return () => controller.abort()
 }

@@ -1,0 +1,135 @@
+name: Hardware compatibility
+description: Report how Yggdrasil Core behaves on a specific computer.
+title: "[Hardware]: "
+labels: ["hardware"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Hardware reports are contributions. They show which machines Yggdrasil Core has actually been tried on.
+        Remove private hostnames and addresses if you do not want them public.
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Works
+        - Works with limitations
+        - Does not work
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version
+    validations:
+      required: true
+  - type: input
+    id: cpu
+    attributes:
+      label: CPU
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU
+    validations:
+      required: true
+  - type: textarea
+    id: drivers
+    attributes:
+      label: Driver/runtime details
+      description: GPU driver, Metal, CUDA, ROCm, or Vulkan details if you know them.
+    validations:
+      required: false
+  - type: input
+    id: ram
+    attributes:
+      label: RAM
+    validations:
+      required: true
+  - type: input
+    id: vram
+    attributes:
+      label: VRAM/unified memory
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Yggdrasil version
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime
+      placeholder: llamacpp
+    validations:
+      required: true
+  - type: textarea
+    id: models
+    attributes:
+      label: Models tested
+    validations:
+      required: true
+  - type: textarea
+    id: quantizations
+    attributes:
+      label: Quantizations tested
+      placeholder: Q4_K_M, Q8_0
+    validations:
+      required: false
+  - type: dropdown
+    id: inference
+    attributes:
+      label: Inference success?
+      options:
+        - Yes
+        - Partial
+        - No
+        - Not tested
+    validations:
+      required: true
+  - type: input
+    id: tokens
+    attributes:
+      label: Approximate tokens/sec if known
+      description: Benchmark results vary with model, runtime, context length, and other load on the machine.
+    validations:
+      required: false
+  - type: dropdown
+    id: multinode
+    attributes:
+      label: Multi-node tested?
+      options:
+        - Yes
+        - No
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: problems
+    attributes:
+      label: Observed problems
+    validations:
+      required: false
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional notes
+    validations:
+      required: false

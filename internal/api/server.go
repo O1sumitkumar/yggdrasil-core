@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -20,6 +21,7 @@ import (
 	"github.com/yeixio/yggdrasil-core/internal/events"
 	"github.com/yeixio/yggdrasil-core/internal/logs"
 	"github.com/yeixio/yggdrasil-core/internal/runtimes"
+	"github.com/yeixio/yggdrasil-core/internal/version"
 	"github.com/yeixio/yggdrasil-core/pkg/contracts"
 )
 
@@ -78,6 +80,7 @@ type Dependencies struct {
 	CreateAPIKey           func(ctx context.Context, name string) (auth.APIKeyRecord, string, error)
 	RevokeAPIKey           func(ctx context.Context, id string) error
 	RotateAPIKey           func(ctx context.Context, id string) (auth.APIKeyRecord, string, error)
+	VerifyAPIKey           func(ctx context.Context, secret string) (auth.APIKeyRecord, error)
 	GetSettings            func(ctx context.Context) (contracts.SettingsView, error)
 	UpdateSettings         func(ctx context.Context, patch map[string]any) (contracts.SettingsView, error)
 	ResetApp               func(ctx context.Context, deleteModels bool) (contracts.SettingsView, error)
@@ -117,7 +120,11 @@ func (s *Server) routes() {
 	s.router.Use(s.corsMiddleware)
 	s.router.Use(s.logMiddleware)
 
+	s.router.HandleFunc("/about", s.handleSourceOffer).Methods(http.MethodGet, http.MethodOptions)
+	s.router.HandleFunc("/source", s.handleSourceOffer).Methods(http.MethodGet, http.MethodOptions)
+
 	api := s.router.PathPrefix("/api/v1").Subrouter()
+	api.Use(s.controlAuthMiddleware)
 	api.HandleFunc("/health", s.handleHealth).Methods(http.MethodGet, http.MethodOptions)
 	api.HandleFunc("/version", s.handleVersion).Methods(http.MethodGet, http.MethodOptions)
 	api.HandleFunc("/hardware", s.handleHardware).Methods(http.MethodGet, http.MethodOptions)
@@ -221,6 +228,33 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.http.Shutdown(ctx)
 }
 
+func (s *Server) controlAuthMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.Config == nil || !config.ListensBeyondLoopback(s.deps.Config.Get().APIHost) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		token, err := auth.BearerToken(r)
+		if err != nil {
+			if errors.Is(err, auth.ErrAPIKeyInURL) {
+				writeErr(w, http.StatusBadRequest, "API_KEY_IN_URL", err.Error(), nil)
+				return
+			}
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "authorization required", nil)
+			return
+		}
+		if s.deps.VerifyAPIKey == nil {
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "authorization required", nil)
+			return
+		}
+		if _, err := s.deps.VerifyAPIKey(r.Context(), token); err != nil {
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid api key", nil)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	ver := "0.1.0-dev"
 	if s.deps.Version != nil {
@@ -234,14 +268,42 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
-	if s.deps.Version != nil {
-		writeJSON(w, http.StatusOK, s.deps.Version())
-		return
-	}
-	writeJSON(w, http.StatusOK, contracts.VersionResponse{
-		Version: "0.1.0-dev",
+	offer := version.CurrentOffer()
+	resp := contracts.VersionResponse{
+		Version: offer.Version,
+		Commit:  offer.Commit,
 		Product: "Yggdrasil",
-	})
+		License: offer.License,
+		Source:  offer.Source,
+	}
+	if s.deps.Version != nil {
+		got := s.deps.Version()
+		if got.Version != "" {
+			resp.Version = got.Version
+		}
+		if got.Commit != "" {
+			resp.Commit = got.Commit
+		}
+		if got.BuildDate != "" {
+			resp.BuildDate = got.BuildDate
+		}
+		if got.Product != "" {
+			resp.Product = got.Product
+		}
+		if got.License != "" {
+			resp.License = got.License
+		}
+		if got.Source != "" {
+			resp.Source = got.Source
+		}
+	} else {
+		resp.BuildDate = version.BuildDate
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleSourceOffer(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, version.CurrentOffer())
 }
 
 func (s *Server) handleHardware(w http.ResponseWriter, r *http.Request) {
@@ -354,6 +416,10 @@ func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 	if s.deps.UpdateSettings != nil {
 		view, err := s.deps.UpdateSettings(r.Context(), patch)
 		if err != nil {
+			if errors.Is(err, auth.ErrAPIKeyRequired) {
+				writeErr(w, http.StatusBadRequest, "API_KEY_REQUIRED", "Create an API key before allowing access from other computers.", nil)
+				return
+			}
 			writeErr(w, http.StatusInternalServerError, "SETTINGS_UPDATE_FAILED", "Could not update settings.", map[string]any{"cause": err.Error()})
 			return
 		}

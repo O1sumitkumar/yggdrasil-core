@@ -1,0 +1,175 @@
+name: Bug report
+description: Report a defect in Yggdrasil Core.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe one defect. Remove secrets before you paste logs.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues
+          required: true
+        - label: I reproduced this on the latest release when practical
+          required: false
+        - label: I removed secrets, tokens, personal data, private URLs, and credentials from logs
+          required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A short summary of the defect.
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Yggdrasil Core version
+      description: From `yggctl version`, the web UI, or the release tag.
+      placeholder: 1.2.0-beta.3
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installation method
+      options:
+        - From source
+        - GitHub Release archive
+        - Debian or Ubuntu package
+        - RPM package
+        - Homebrew
+        - Docker
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version
+      placeholder: macOS 15.5, Windows 11 24H2, Ubuntu 24.04
+    validations:
+      required: true
+  - type: input
+    id: cpu
+    attributes:
+      label: CPU
+      placeholder: Apple M4 Pro, AMD Ryzen 7 7700, Intel Core Ultra 7
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU
+      placeholder: Apple Silicon GPU, NVIDIA RTX 4070, AMD Radeon, Intel Arc, none
+    validations:
+      required: true
+  - type: input
+    id: ram
+    attributes:
+      label: System memory
+      placeholder: 32 GB
+    validations:
+      required: true
+  - type: input
+    id: vram
+    attributes:
+      label: GPU VRAM / unified memory
+      placeholder: 16 GB unified, 12 GB VRAM, unknown
+    validations:
+      required: false
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime
+      placeholder: llamacpp, external-openai
+    validations:
+      required: true
+  - type: input
+    id: runtime-version
+    attributes:
+      label: Runtime version
+    validations:
+      required: false
+  - type: input
+    id: model
+    attributes:
+      label: Model
+    validations:
+      required: false
+  - type: input
+    id: quantization
+    attributes:
+      label: Model format/quantization
+      placeholder: GGUF Q4_K_M
+    validations:
+      required: false
+  - type: dropdown
+    id: topology
+    attributes:
+      label: Single-node or multi-node?
+      options:
+        - Single-node
+        - Multi-node
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant configuration
+      description: Redact hostnames, tokens, and private addresses if they are sensitive.
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Remove API keys, tokens, personal data, private URLs, and credentials before pasting.
+        Daemon logs are written under the data directory in logs/daemon.log.
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+    validations:
+      required: false

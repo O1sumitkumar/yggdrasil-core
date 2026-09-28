@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -12,11 +13,18 @@ import (
 
 	"github.com/yeixio/yggdrasil-core/internal/app"
 	"github.com/yeixio/yggdrasil-core/internal/config"
+	"github.com/yeixio/yggdrasil-core/internal/version"
 )
 
 func main() {
 	dataDir := flag.String("data-dir", "", "application data directory")
+	showVersion := flag.Bool("version", false, "print version, license, and corresponding source")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Print(version.CurrentOffer().Text())
+		os.Exit(0)
+	}
 
 	if *dataDir == "" {
 		*dataDir = config.DefaultDataDir()

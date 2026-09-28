@@ -38,6 +38,41 @@ jobs:
       - name: Test
         run: go test ./...
 
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+      - name: Build daemon and yggctl
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          ext=""
+          if [ "$GOOS" = "windows" ]; then
+            ext=".exe"
+          fi
+          mkdir -p bin
+          go build -o "bin/yggdrasil-daemon${ext}" ./cmd/daemon
+          go build -o "bin/yggctl${ext}" ./cmd/devctl
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

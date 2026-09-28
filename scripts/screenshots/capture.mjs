@@ -33,6 +33,28 @@ const ready = new Promise((resolve, reject) => {
   })
 })
 
+async function openScreen(page, screen) {
+  const query = new URLSearchParams({ screenshot: '1', screen: screen.id })
+  if (screen.query) {
+    for (const [key, value] of new URLSearchParams(screen.query)) {
+      query.set(key, value)
+    }
+  }
+  const url = `${base}${screen.path}?${query}`
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  try {
+    await page.waitForFunction(
+      ({ text, path }) => location.pathname === path && (document.body?.innerText || '').includes(text),
+      { text: screen.readyText, path: screen.path },
+      { timeout: 30_000 },
+    )
+  } catch (error) {
+    const text = await page.locator('body').innerText().catch(() => '')
+    console.error(`Page text for ${screen.id}:\n${text.slice(0, 1200)}`)
+    throw error
+  }
+}
+
 try {
   base = await ready
   const browser = await chromium.launch(
@@ -40,26 +62,8 @@ try {
   )
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 })
   for (const screen of config.screens) {
-    const query = new URLSearchParams({ screenshot: '1', screen: screen.id })
-    if (screen.query) {
-      for (const [key, value] of new URLSearchParams(screen.query)) {
-        query.set(key, value)
-      }
-    }
-    const url = `${base}${screen.path}?${query}`
-    console.log(`Capturing ${screen.id} ${url}`)
-    await page.goto(url, { waitUntil: 'domcontentloaded' })
-    try {
-      await page.waitForFunction(
-        (text) => document.body?.innerText?.includes(text),
-        screen.readyText,
-        { timeout: 20_000 },
-      )
-    } catch (error) {
-      const text = await page.locator('body').innerText().catch(() => '')
-      console.error(`Page text for ${screen.id}:\n${text.slice(0, 1200)}`)
-      throw error
-    }
+    console.log(`Capturing ${screen.id}`)
+    await openScreen(page, screen)
     await page.screenshot({ path: path.join(outDir, screen.filename) })
   }
   await browser.close()

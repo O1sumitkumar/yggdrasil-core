@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
-import { api } from '@/lib/api'
+import { api, forgetApiKey, rememberApiKey, storedApiKey } from '@/lib/api'
 import { formatLastUsed } from '@/features/models/modelPresentation'
 import { useUIStore } from '@/stores/uiStore'
 import type { APIKeyRecord } from '@/types/api'
@@ -39,9 +39,12 @@ async function probeLocalApi(lanEnabled: boolean): Promise<ApiProbeResult> {
 
   let openaiStatus: number | null = null
   try {
+    const headers: Record<string, string> = { Accept: 'application/json' }
+    const key = storedApiKey()
+    if (key) headers.Authorization = `Bearer ${key}`
     const res = await fetch('/v1/models', {
       method: 'GET',
-      headers: { Accept: 'application/json' },
+      headers,
     })
     openaiStatus = res.status
   } catch {
@@ -79,6 +82,11 @@ function lanUrlFromNodeAddress(address: string | undefined, port: number): strin
   return `http://${host}:${port}/v1`
 }
 
+function listensBeyondLoopback(host: string): boolean {
+  const normalized = host.trim().toLowerCase().replace(/^\[|\]$/g, '')
+  return normalized !== '' && normalized !== 'localhost' && normalized !== '127.0.0.1' && normalized !== '::1'
+}
+
 function maskPrefix(prefix: string): string {
   const tip = prefix.slice(-4) || prefix
   return `••••••••••${tip}`
@@ -93,6 +101,8 @@ export function ApiAccessPage() {
   const [copiedField, setCopiedField] = useState<string | null>(null)
   const [probeTick, setProbeTick] = useState(0)
   const [lanConfirmOpen, setLanConfirmOpen] = useState(false)
+  const [browserHasKey, setBrowserHasKey] = useState(() => Boolean(storedApiKey()))
+  const [dialogKeyName, setDialogKeyName] = useState('This computer')
   const [docsOpen, setDocsOpen] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
 
@@ -150,6 +160,8 @@ export function ApiAccessPage() {
       if (result?.secret) {
         setRevealedSecret(result.secret)
         setRevealedKeyId(result.key?.id ?? null)
+        rememberApiKey(result.secret, result.key?.id)
+        setBrowserHasKey(true)
       }
       setNewKeyName('')
       setShowCreate(false)
@@ -163,6 +175,8 @@ export function ApiAccessPage() {
       if (result?.secret) {
         setRevealedSecret(result.secret)
         setRevealedKeyId(result.key?.id ?? null)
+        rememberApiKey(result.secret, result.key?.id)
+        setBrowserHasKey(true)
       }
       queryClient.invalidateQueries({ queryKey: ['api-keys'] })
     },
@@ -175,6 +189,8 @@ export function ApiAccessPage() {
         setRevealedSecret(null)
         setRevealedKeyId(null)
       }
+      forgetApiKey(id)
+      setBrowserHasKey(Boolean(storedApiKey()))
       queryClient.invalidateQueries({ queryKey: ['api-keys'] })
     },
   })
@@ -192,7 +208,7 @@ export function ApiAccessPage() {
   const serviceLabel =
     probeState === 'ok' ? 'Running' : probeState === 'fail' ? 'Not responding' : 'Checking…'
   const accessLabel = lanEnabled ? 'Local network' : 'This computer only'
-  const authRequired = lanEnabled
+  const authRequired = lanEnabled || listensBeyondLoopback(bindHost)
 
   const copyText = async (field: string, value: string) => {
     try {
@@ -335,7 +351,8 @@ export function ApiAccessPage() {
               <span className="font-mono text-ink">/v1</span>. Point clients at the endpoint
               above and send{' '}
               <span className="font-mono text-ink">Authorization: Bearer &lt;api-key&gt;</span>{' '}
-              when network access is on.
+              when Yggdrasil is reachable from other computers. `/api/v1` and `/v1` both
+              require that header. A key does not encrypt plain HTTP.
             </p>
             <pre className="mt-3 overflow-x-auto rounded-md bg-canvas px-3 py-2 font-mono text-[11px] text-ink">
               {`curl ${localEndpoint}/models \\
@@ -373,7 +390,9 @@ export function ApiAccessPage() {
         {lanEnabled && (
           <p className="text-xs text-ink-faint">
             After changing network access, fully quit and reopen Yggdrasil so the server rebinds.
-            Test API only checks this computer — not reachability from other devices.
+            An API key is required for every connection once the listener is no longer loopback.
+            A key does not encrypt traffic on plain HTTP. Test API only checks this computer —
+            not reachability from other devices.
           </p>
         )}
       </section>
@@ -557,12 +576,52 @@ export function ApiAccessPage() {
         >
           <div className="w-full max-w-md rounded-panel border border-line bg-surface p-5 shadow-panel">
             <h2 id="lan-confirm-title" className="font-display text-lg font-semibold text-ink">
-              Enable local network access?
+              Allow access from other computers?
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-ink-muted">
-              Local network access will make this API reachable by other devices on your LAN. An
-              API key will be required.
+              Devices on your local network will be able to connect to Yggdrasil. An API key is
+              required for all remote connections.
             </p>
+            <p className="mt-2 text-sm leading-relaxed text-ink-muted">
+              An API key over plain HTTP does not encrypt traffic. Quit and reopen Yggdrasil after
+              enabling this so the server listens on the network.
+            </p>
+            {!browserHasKey && (
+              <div className="mt-4 space-y-2">
+                <p className="text-sm text-ink">
+                  Create an API key so this browser can keep connecting after the server rebinds.
+                  The full key is shown only once.
+                </p>
+                <label className="block text-sm font-medium text-ink" htmlFor="lan-key-name">
+                  Key name
+                </label>
+                <input
+                  id="lan-key-name"
+                  type="text"
+                  value={dialogKeyName}
+                  onChange={(e) => setDialogKeyName(e.target.value)}
+                  className="field w-full"
+                />
+                <button
+                  type="button"
+                  className="btn-secondary px-3 py-1.5 text-xs"
+                  disabled={createKeyMutation.isPending || !dialogKeyName.trim()}
+                  onClick={() => createKeyMutation.mutate(dialogKeyName.trim())}
+                >
+                  {createKeyMutation.isPending ? 'Creating…' : 'Create key'}
+                </button>
+              </div>
+            )}
+            {revealedSecret && (
+              <p className="mt-3 break-all font-mono text-xs text-ink">{revealedSecret}</p>
+            )}
+            {updateSettingsMutation.isError && (
+              <p className="mt-3 text-sm text-warning">
+                {updateSettingsMutation.error instanceof Error
+                  ? updateSettingsMutation.error.message
+                  : 'Could not enable network access.'}
+              </p>
+            )}
             <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"
@@ -575,10 +634,12 @@ export function ApiAccessPage() {
               <button
                 type="button"
                 className="btn-primary px-3 py-1.5 text-xs"
-                disabled={updateSettingsMutation.isPending}
+                disabled={
+                  updateSettingsMutation.isPending || activeKeys.length === 0 || !browserHasKey
+                }
                 onClick={() => updateSettingsMutation.mutate(true)}
               >
-                {updateSettingsMutation.isPending ? 'Enabling…' : 'Enable LAN access'}
+                {updateSettingsMutation.isPending ? 'Enabling…' : 'Allow access'}
               </button>
             </div>
           </div>

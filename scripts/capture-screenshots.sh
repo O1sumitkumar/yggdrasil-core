@@ -37,6 +37,30 @@ fi
 
 node scripts/screenshots/capture.mjs
 
+if command -v ffmpeg >/dev/null 2>&1; then
+  hold="${DEMO_HOLD_SEC:-3.2}"
+  concat="$(mktemp)"
+  python3 - "$ROOT" "$hold" "$concat" <<'PY'
+import json, os, sys
+root, hold, list_path = sys.argv[1:4]
+cfg = json.load(open(os.path.join(root, "screenshots/config.json")))
+paths = [os.path.join(root, "docs/screenshots", screen["filename"]) for screen in cfg["screens"]]
+missing = [path for path in paths if not os.path.isfile(path)]
+if missing:
+    raise SystemExit("missing screenshot: " + ", ".join(missing))
+lines = [f"file '{path}'\nduration {hold}\n" for path in paths]
+lines.append(f"file '{paths[-1]}'\n")
+open(list_path, "w").write("".join(lines))
+PY
+  ffmpeg -y -f concat -safe 0 -i "$concat" \
+    -r 25 -an -c:v libx264 -pix_fmt yuv420p -movflags +faststart \
+    docs/screenshots/demo.mp4
+  ffmpeg -y -i docs/screenshots/demo.mp4 \
+    -vf "fps=10,scale=960:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" \
+    docs/screenshots/demo.gif
+  rm -f "$concat" docs/screenshots/demo.webm
+fi
+
 if command -v magick >/dev/null 2>&1 || command -v convert >/dev/null 2>&1; then
   chmod +x scripts/process-screenshots.sh scripts/validate-screenshots.sh
   ./scripts/process-screenshots.sh
@@ -44,3 +68,6 @@ if command -v magick >/dev/null 2>&1 || command -v convert >/dev/null 2>&1; then
 fi
 
 echo "README screenshots: docs/screenshots"
+if [[ -f docs/screenshots/demo.mp4 ]]; then
+  echo "Demo video: docs/screenshots/demo.mp4"
+fi

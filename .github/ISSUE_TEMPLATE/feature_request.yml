@@ -1,0 +1,58 @@
+name: Feature request
+description: Propose a change to Yggdrasil Core.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem/use case
+      description: What are you trying to do?
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Proposed behavior
+      description: What should Yggdrasil Core do? Implementation details are optional.
+    validations:
+      required: true
+  - type: textarea
+    id: why-core
+    attributes:
+      label: Why this belongs in Yggdrasil Core
+      description: Core is the headless control plane. Desktop and mobile clients are separate products.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Possible alternatives
+    validations:
+      required: false
+  - type: dropdown
+    id: protocol
+    attributes:
+      label: Does it require protocol/API changes?
+      options:
+        - Yes
+        - No
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: clients
+    attributes:
+      label: Does it affect desktop/mobile clients?
+      options:
+        - Yes
+        - No
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+    validations:
+      required: false

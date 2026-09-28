@@ -14,8 +14,8 @@ func main() {
 		os.Exit(2)
 	}
 	switch os.Args[1] {
-	case "version":
-		fmt.Printf("Yggdrasil %s (commit %s, built %s)\n", version.Version, version.Commit, version.BuildDate)
+	case "version", "about":
+		fmt.Print(version.CurrentOffer().Text())
 	case "paths":
 		cfg := config.DefaultConfig()
 		fmt.Printf("data:     %s\n", cfg.DataDir)
@@ -30,5 +30,5 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: yggctl <version|paths>\n")
+	fmt.Fprintf(os.Stderr, "usage: yggctl <version|about|paths>\n")
 }

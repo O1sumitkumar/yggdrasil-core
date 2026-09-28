@@ -19,6 +19,8 @@ export interface VersionResponse {
   commit: string
   build_date: string
   product: string
+  license?: string
+  source?: string
 }
 
 export interface CPUInfo {

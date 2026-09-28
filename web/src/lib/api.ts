@@ -71,6 +71,33 @@ export function normalizePairingSession(raw: Record<string, unknown>): PairingSe
   }
 }
 
+const storedApiKeyName = 'yggdrasil.apiKey'
+const storedApiKeyIdName = 'yggdrasil.apiKeyId'
+
+export function storedApiKey(): string {
+  if (typeof window === 'undefined') return ''
+  return window.localStorage.getItem(storedApiKeyName) ?? ''
+}
+
+export function rememberApiKey(secret: string, id?: string) {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(storedApiKeyName, secret)
+  if (id) window.localStorage.setItem(storedApiKeyIdName, id)
+}
+
+export function forgetApiKey(id?: string) {
+  if (typeof window === 'undefined') return
+  if (id && window.localStorage.getItem(storedApiKeyIdName) !== id) return
+  window.localStorage.removeItem(storedApiKeyName)
+  window.localStorage.removeItem(storedApiKeyIdName)
+}
+
+function authHeaders(): Record<string, string> {
+  const key = storedApiKey()
+  if (!key) return {}
+  return { Authorization: `Bearer ${key}` }
+}
+
 export function getApiBase(): string {
   if (typeof window === 'undefined') {
     return ''
@@ -96,6 +123,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T | null> {
       ...init,
       headers: {
         Accept: 'application/json',
+        ...authHeaders(),
         ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
         ...init?.headers,
       },
@@ -130,7 +158,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T | null> {
 
 export async function endpointExists(path: string): Promise<boolean> {
   try {
-    const response = await fetch(`${getApiBase()}${path}`, { method: 'HEAD' })
+    const response = await fetch(`${getApiBase()}${path}`, {
+      method: 'HEAD',
+      headers: authHeaders(),
+    })
     return response.ok
   } catch {
     return false
@@ -158,6 +189,7 @@ export async function streamChat({
     headers: {
       Accept: 'text/event-stream',
       'Content-Type': 'application/json',
+      ...authHeaders(),
     },
     body: JSON.stringify({ ...body, stream: true }),
     signal,

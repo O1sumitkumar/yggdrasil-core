@@ -28,6 +28,28 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/VersionResponse"
+  /about:
+    get:
+      summary: AGPL corresponding-source offer
+      operationId: getAbout
+      responses:
+        "200":
+          description: Name, version, commit, license, and source URL for this build
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceOffer"
+  /source:
+    get:
+      summary: AGPL corresponding-source offer
+      operationId: getSource
+      responses:
+        "200":
+          description: Same body as /about
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceOffer"
   /api/v1/hardware:
     get:
       summary: Local hardware inventory
@@ -387,6 +409,24 @@ components:
         build_date:
           type: string
         product:
+          type: string
+        license:
+          type: string
+        source:
+          type: string
+          description: URL of the corresponding source for this build.
+    SourceOffer:
+      type: object
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        commit:
+          type: string
+        license:
+          type: string
+        source:
           type: string
     HardwareInventory:
       type: object
