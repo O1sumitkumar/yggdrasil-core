@@ -43,11 +43,15 @@ package_linux() {
   build_binaries linux "$goarch" "$stage"
   local cfg
   cfg="$(mktemp)"
-  cat > "$cfg" <<EOF
+  # Keep "~" out of the shell heredoc. On the release runner it expands to the home directory.
+  {
+    cat > "$cfg" <<EOF
 name: yggdrasil
 arch: ${debarch}
 platform: linux
-version: ${PKG_VERSION}
+EOF
+    printf 'version: %s\n' "$PKG_VERSION" >> "$cfg"
+    cat >> "$cfg" <<EOF
 maintainer: YEIXIO LLC <hello@yeix.io>
 description: Local AI daemon and web UI
 homepage: https://yggdrasil.yeix.io
@@ -72,8 +76,10 @@ scripts:
 rpm:
   arch: ${rpmarch}
 EOF
-  nfpm package -p deb -f "$cfg" -t "dist/yggdrasil_${PKG_VERSION}_${debarch}.deb"
-  nfpm package -p rpm -f "$cfg" -t "dist/yggdrasil-${PKG_VERSION}-1.${rpmarch}.rpm"
+  }
+  # File names keep the human version. "~" in a path expands to the runner home directory.
+  nfpm package -p deb -f "$cfg" -t "dist/yggdrasil_${VERSION}_${debarch}.deb"
+  nfpm package -p rpm -f "$cfg" -t "dist/yggdrasil-${VERSION}-1.${rpmarch}.rpm"
   rm -f "$cfg"
   rm -rf "$stage"
 }
