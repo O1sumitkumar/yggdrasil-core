@@ -70,7 +70,8 @@ jobs:
             git commit -m "Publish the Homebrew formula for ${GITHUB_REF_NAME#v}."
             # formula is a release branch. main requires a pull request, so this ref is replaced each release.
             git push --force origin HEAD:formula
-            if ! gh pr view formula --json url --jq .url >/dev/null 2>&1; then
+            # gh pr view matches a merged pull request for this head, so look for an open one.
+            if [ -z "$(gh pr list --head formula --base main --state open --json number --jq '.[0].number')" ]; then
               gh pr create --base main --head formula \
                 --title "Publish the Homebrew formula for ${GITHUB_REF_NAME#v}" \
                 --body "Updates Formula/yggdrasil.rb from the ${GITHUB_REF_NAME} release."
