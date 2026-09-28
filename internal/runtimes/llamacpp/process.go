@@ -187,7 +187,7 @@ func (r *Runtime) Health(ctx context.Context) error {
 		return err
 	}
 	if !det.Installed {
-		return fmt.Errorf("llama-server not installed")
+		return fmt.Errorf("llama-server not installed: %s", det.Message)
 	}
 	return nil
 }
