@@ -15,7 +15,7 @@ This list is directional. It is not a commitment and it has no dates. Shipped be
 
 ## Next
 
-- publish a tagged release that contains the Windows amd64 archive, then try that archive on a clean Windows machine
+- try the Windows amd64 archive on a clean Windows machine
 - code signing for core release artifacts
 - a `yggctl` that can show status, nodes, and models (today it prints version and paths)
 - shell completion for `yggctl`

@@ -1,14 +1,20 @@
 # Yggdrasil Core
 
-**Turn the computers you already own into a local AI team.**
+> **Local AI should be as easy to use as SaaS AI.**
 
-Yggdrasil Core is an open-source control plane for local AI. It manages models and runtimes, discovers other computers on your network, places workloads where they fit, and exposes an OpenAI-compatible API.
+**An open-source control plane that makes local AI feel like a hosted AI service.**
 
-Headless local-AI orchestration for the computers you already own. Run it on one machine, or pair several together.
+Yggdrasil Core is built around one goal: make running AI on hardware you own feel as simple as using a hosted service.
 
-It is the daemon (`yggdrasil-daemon`), the local web UI that daemon serves, and the HTTP API in front of local models. Yggdrasil Desktop and Yggdrasil Mobile are separate clients, developed outside this repository.
+You should not need to understand model formats, runtimes, GPU backends, memory limits, networking, or cluster scheduling just to use local AI.
 
-**Status:** Beta. See the latest [GitHub Release](https://github.com/yeixio/yggdrasil-core/releases).
+Yggdrasil detects your hardware, recommends and manages models, starts the right runtime, uses other computers when needed, and exposes a consistent API to your applications. It manages models, runtimes, hardware, and multiple computers behind that API.
+
+**Your computers. Your models. Your AI.**
+
+The daemon (`yggdrasil-daemon`), the local web UI, and the HTTP API are in this repository. Yggdrasil Desktop and Yggdrasil Mobile are separate clients, developed outside this repository.
+
+**Status:** Stable. See the latest [GitHub Release](https://github.com/yeixio/yggdrasil-core/releases).
 
 [Quick start](#quick-start) · [Documentation](#documentation) · [Roadmap](ROADMAP.md) · [Contributing](CONTRIBUTING.md)
 
@@ -17,13 +23,51 @@ It is the daemon (`yggdrasil-daemon`), the local web UI that daemon serves, and 
 [![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fyeixio%2Fyggdrasil-core%2Fcoverage%2Fcoverage.json)](https://github.com/yeixio/yggdrasil-core/actions/workflows/ci.yml)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 
+## Design principle
+
+Yggdrasil is not trying to expose every local-AI knob.
+
+It is trying to make those knobs unnecessary.
+
+The default experience should be:
+
+**Choose AI → Use AI**
+
+Advanced controls should exist when needed, but users should not have to become AI infrastructure engineers to run models locally.
+
+## Why Yggdrasil?
+
+Hosted AI is easy:
+
+1. Pick a model.
+2. Send a request.
+3. Get an answer.
+
+Local AI often is not.
+
+Before you can ask a question, you may need to understand model formats, quantization, runtime backends, GPU support, memory requirements, context sizes, ports, APIs, and which machine can actually run the model.
+
+Yggdrasil's goal is to hide that complexity.
+
+You choose what AI you want to use. Yggdrasil figures out how to run it on the hardware you own.
+
+To make that possible, Core:
+
+- detects the CPU, memory, storage, and accelerators available
+- determines which models fit
+- installs and manages model runtimes
+- downloads and manages models
+- starts and stops models when they are needed, and unloads them after they sit idle
+- discovers other Yggdrasil computers
+- places workloads on machines that can run them
+- monitors model and node health
+- exposes one consistent OpenAI-compatible API
+
 <p align="center">
   <a href="docs/screenshots/demo.mp4">
     <img src="docs/screenshots/demo.gif" alt="Walkthrough of chat, models, computers, performance, diagnostics, and API access" width="850">
   </a>
 </p>
-
-**One daemon. Multiple computers. Local models. One API.**
 
 ## Quick start
 
@@ -55,7 +99,7 @@ The package installs `yggdrasil-daemon`, `yggctl`, the web UI, and `yggdrasil.se
 
 ### Windows
 
-Windows amd64 builds from source today. The next tagged release attaches an unsigned `yggdrasil-<version>-windows-amd64-headless.tar.gz`.
+The GitHub Release includes an unsigned `yggdrasil-<version>-windows-amd64-headless.tar.gz`. A source build is below.
 
 ### Build from source
 
@@ -72,18 +116,6 @@ make daemon
 `make frontend` installs web dependencies, runs the web tests, and writes `web/dist`. The daemon serves that directory when it finds `index.html` there. A build from this tree reports `0.1.0-dev` unless the version is set with `-ldflags`. See [docs/development.md](docs/development.md).
 
 Dockerfiles in this repository are for development and the cluster check. Release archives are the packaged builds.
-
-## Why Yggdrasil?
-
-Running one local model is straightforward. Managing models, runtimes, hardware, and several computers as one environment takes a control plane.
-
-Yggdrasil Core sits between your applications and the machines running your models:
-
-- it detects CPU, memory, disk, and accelerators on the host
-- it installs GGUF models and a managed llama.cpp runtime
-- it discovers and pairs other Yggdrasil computers on the LAN
-- it places Team roles onto paired machines that can run them
-- it exposes a loopback API that other programs can call
 
 ## Features
 
@@ -163,7 +195,7 @@ curl http://127.0.0.1:7331/v1/chat/completions \
 | --- | --- |
 | macOS Apple Silicon and Intel | Homebrew, a darwin headless archive, or a source build |
 | Linux amd64 and arm64 | `.deb`, `.rpm`, or a source build |
-| Windows amd64 | Source build. An unsigned headless archive is produced on the next tagged release |
+| Windows amd64 | Unsigned headless archive from the GitHub Release, or a source build |
 
 ## Supported hardware
 

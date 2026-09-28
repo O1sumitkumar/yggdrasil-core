@@ -15,6 +15,8 @@ func TestStatusAndDiff(t *testing.T) {
 	}
 	dir := t.TempDir()
 	gitCmd(t, dir, "init")
+	gitCmd(t, dir, "config", "user.email", "test@example.com")
+	gitCmd(t, dir, "config", "user.name", "Yggdrasil Test")
 	if err := os.WriteFile(filepath.Join(dir, "note.txt"), []byte("one\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

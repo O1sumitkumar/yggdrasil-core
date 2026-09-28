@@ -37,3 +37,7 @@ cd yggdrasil-*-windows-amd64-headless
 ```
 
 Open `http://127.0.0.1:7331`.
+
+## Known limits
+
+Binaries are not code-signed. The apt repository is unsigned (`trusted=yes`). A bearer token on plain HTTP does not encrypt traffic. A clean install of this Windows archive, and of the Intel Mac archive, has not been recorded in the repository.

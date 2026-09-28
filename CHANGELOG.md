@@ -6,11 +6,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Thi
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-28
+
+First stable release. It follows `v1.2.0-beta.3`. Binaries and the apt repository are not signed.
+
 ### Added
 
+- Unsigned Windows amd64 headless archive on the GitHub Release.
+- Homebrew formula written and merged from the release workflow.
+- Coverage badge, golangci-lint, and ESLint in CI.
 - Repository guides for contributors, security reports, privacy, architecture, compatibility, and issue forms.
-- CI cross-compilation of `yggdrasil-daemon` and `yggctl` for Linux, macOS, and Windows.
-- A Windows amd64 headless archive in the release packaging script. Archives are not signed.
+- Feature specifications and the distributed-inference research brief. Those documents are plans, not shipped behavior.
+
+### Changed
+
+- Web UI uses Tailwind 4.
+- The README leads with the local-AI goal, the demo, and packaged install paths.
+
+### Fixed
+
+- llama.cpp health errors include the install location when the runtime binary is missing.
 
 ## Earlier releases
 

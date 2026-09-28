@@ -6,7 +6,7 @@ Security fixes are considered for the latest tagged release. Older tags, includi
 
 | Version | Supported |
 | --- | --- |
-| Latest tag (currently the `v1.2.x` beta line) | Yes |
+| Latest tag | Yes |
 | Older tags | No |
 
 ## Reporting a Vulnerability
