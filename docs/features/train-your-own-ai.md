@@ -1,0 +1,276 @@
+# Yggdrasil — Train Your Own AI
+
+## Specialized Model Training & Knowledge — Feature Specification V1
+
+### Goal
+
+Let power users and small organizations create inexpensive, hyper-specialized local AI assistants without requiring machine-learning expertise.
+
+Yggdrasil should teach users the difference between **training model behavior** and **connecting changing knowledge**, then guide them toward the correct approach.
+
+## Product Principle
+
+Users should describe the AI they want to build, provide their material, and let Yggdrasil handle the implementation details.
+
+The product may legitimately present this as **Train Your Own AI**, while transparently explaining which information is fine-tuned into the model and which information should remain connected knowledge.
+
+The objective is not to expose LoRA hyperparameters. The objective is to help a non-ML expert produce a useful specialized AI.
+
+## Core Educational Model
+
+Make two concepts visually distinct:
+
+### Train how your AI behaves
+
+Use examples to teach:
+
+- role,
+- terminology,
+- response patterns,
+- workflows,
+- tone,
+- specialized task behavior.
+
+Yggdrasil may use LoRA/QLoRA fine-tuning.
+
+### Connect what your AI knows
+
+Attach information that changes or must remain authoritative:
+
+- inventory,
+- prices,
+- SKUs,
+- databases,
+- product catalogs,
+- policies,
+- documents,
+- APIs,
+- other business data.
+
+Yggdrasil retrieves this information when needed.
+
+Suggested explanation:
+
+> Training teaches your AI how to do its job. Connected knowledge gives it the current information it needs to do that job.
+
+## Example — Tire Business
+
+A tire business wants a small local assistant that answers customer questions accurately without paying for a large hosted model.
+
+Training examples can teach the assistant how to:
+
+- ask for vehicle year/make/model,
+- interpret customer requests,
+- use tire terminology,
+- explain fitment,
+- format recommendations.
+
+Current tire inventory, SKUs, prices, availability, and changing fitment/catalog data should normally remain connected knowledge rather than being baked into model weights.
+
+The deployed assistant combines:
+
+- a small base model,
+- optional fine-tuning,
+- current business knowledge.
+
+## Guided Build Flow
+
+1. **Describe the AI** — ask what the user wants the specialized assistant to do.
+2. **Choose a base model** — recommend based on task, license, hardware, training fit, and deployment target.
+3. **Add material** — examples, chats, documents, spreadsheets, structured datasets, and supported knowledge sources.
+4. **Classify material** — recommend Training, Knowledge, or Both for each source.
+5. **Review plan** — show what will be fine-tuned and what will remain connected.
+6. **Prepare** — validate/clean training examples and configure knowledge ingestion.
+7. **Train** — run fine-tuning on a suitable node.
+8. **Evaluate** — compare base vs specialized model on representative test prompts.
+9. **Deploy** — save the resulting specialized AI as a reusable Yggdrasil model/profile/assistant.
+
+## Intelligent Data Guidance
+
+Yggdrasil should proactively detect likely misuse rather than silently accepting every file as training data.
+
+- Frequently changing structured data should usually be recommended as Connected Knowledge.
+- High-quality input/output examples or conversations can be recommended as training examples.
+- Mixed sources can be split between Training and Knowledge.
+- Recommendations should be user-reviewable.
+- Advanced users may override when technically supported.
+
+## Training Scope
+
+V1 training should focus on parameter-efficient fine-tuning such as LoRA/QLoRA rather than foundation-model pretraining from scratch.
+
+Training targets include:
+
+- task behavior,
+- domain terminology,
+- response structure,
+- classification/extraction patterns,
+- style,
+- specialized workflows.
+
+Expose simple presets:
+
+- Quick
+- Balanced
+- Highest Quality
+
+Keep raw hyperparameters behind Advanced mode.
+
+Initially store customization as a base-model + adapter relationship. Merging/export can be added where supported.
+
+## Knowledge Scope
+
+Integrate with Mimir or the existing Yggdrasil knowledge/RAG layer.
+
+Support useful sources incrementally:
+
+- documents,
+- CSV/spreadsheets,
+- product catalogs,
+- local folders,
+- structured data,
+- later database/API connectors.
+
+Knowledge should be refreshable without retraining the model.
+
+## Hardware & Training Fit
+
+Training fit must be calculated separately from inference fit.
+
+Estimate before starting:
+
+- required memory,
+- storage,
+- likely duration,
+- eligible Yggdrasil nodes.
+
+Norn should select a capable training node.
+
+Initial implementation should train on one node. Distributed training is out of scope for V1.
+
+## Trainer Abstraction
+
+Keep backend-specific implementation behind a common Trainer interface.
+
+Potential backends include:
+
+- MLX-based training on Apple Silicon.
+- PyTorch/PEFT-compatible training on supported GPU platforms.
+- Additional optimized backends later.
+
+The UI/job model should not depend directly on one trainer implementation.
+
+## Dataset Preparation
+
+Dataset preparation is part of the product.
+
+Allow users to create training material from:
+
+- existing chats,
+- pasted examples,
+- imported JSONL,
+- documents,
+- other supported sources.
+
+Validate formatting, detect obvious duplicates, flag low-quality/empty examples, and let users review/edit/remove examples.
+
+## Training Experience
+
+Show clear states:
+
+- queued,
+- preparing dataset,
+- loading model,
+- training,
+- evaluating,
+- exporting,
+- complete,
+- failed,
+- cancelled.
+
+Display:
+
+- elapsed time,
+- estimated remaining time when reliable,
+- node/device,
+- progress/epochs,
+- useful training metrics.
+
+Allow cancellation and clean up resources on failure/cancel.
+
+## Evaluation
+
+Evaluation is required before deployment.
+
+Provide side-by-side **Base vs Specialized** responses.
+
+Allow users to create a small test set and rerun it after changes.
+
+Do not imply that lower training loss automatically means better real-world behavior.
+
+## Deployment
+
+After successful evaluation:
+
+- let the user name and save the specialized AI,
+- associate it with its base model,
+- preserve adapter/version,
+- preserve profile/system instructions,
+- preserve connected knowledge sources,
+- make it usable through normal Yggdrasil chat/API surfaces,
+- support versioning so retraining creates a new revision.
+
+## UX Language
+
+Primary language should emphasize outcomes:
+
+- Build
+- Train
+- Knowledge
+- Examples
+- Test
+- Deploy
+
+Explain LoRA, QLoRA, RAG, embeddings, epochs, and similar terminology only when the user opens advanced information.
+
+## V1 Scope
+
+- Dedicated Train/Customize tab.
+- Guided specialized-AI creation flow.
+- Base-model recommendation.
+- Training-vs-knowledge education and source classification.
+- LoRA/QLoRA-style fine-tuning through supported trainers.
+- Dataset import/preparation and review.
+- Separate training-fit estimate.
+- Single-node training scheduling.
+- Progress/cancel/failure cleanup.
+- Base-vs-specialized evaluation.
+- Deployment as a reusable specialized AI.
+- Connection to existing Yggdrasil knowledge/RAG capabilities.
+
+## Explicitly Out of Scope for V1
+
+- Training foundation models from scratch.
+- Large-scale distributed training.
+- Automatic creation of a perfect dataset from arbitrary raw data.
+- Complex AutoML/hyperparameter search.
+- Hosted GPU marketplace.
+- Guaranteed factual correctness solely because a model was fine-tuned.
+- Duplicating Mimir/RAG infrastructure inside the training subsystem.
+
+## Acceptance Criteria
+
+1. A non-ML user can create a specialized AI without configuring raw training hyperparameters.
+2. The UI clearly teaches the difference between training behavior and connecting knowledge.
+3. Yggdrasil warns when frequently changing data appears better suited to connected knowledge.
+4. Users can review Yggdrasil’s classification before training.
+5. Training fit is evaluated independently from inference fit.
+6. A supported training job can run, report progress, be cancelled, and clean up resources correctly.
+7. The base model remains available after customization.
+8. Users can compare base and specialized behavior before deployment.
+9. Changing connected business data does not require retraining.
+10. A completed specialized AI can be saved and used through normal Yggdrasil interfaces.
+
+## Product Outcome
+
+The feature succeeds when a user can arrive with a business problem—not ML expertise—and leave with a small, specialized local AI that has learned the right behavior while retaining access to current authoritative data.
