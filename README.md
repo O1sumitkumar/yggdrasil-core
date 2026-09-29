@@ -278,6 +278,9 @@ These are specifications. They are not implemented in this repository.
 - [Scheduler and automations](docs/features/scheduler-and-automations.md)
 - [Train your own AI](docs/features/train-your-own-ai.md)
 - [Kubernetes-native model deployment](docs/features/kubernetes-native-model-deployment.md)
+- [Community model ratings](docs/features/community-model-ratings.md)
+- [Expanded tool platform](docs/features/expanded-tool-platform.md)
+- [One-line node join](docs/features/one-line-node-join.md)
 
 ### Research
 
