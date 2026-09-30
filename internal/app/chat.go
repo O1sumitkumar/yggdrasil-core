@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/yeixio/yggdrasil-core/internal/contextusage"
 	"github.com/yeixio/yggdrasil-core/internal/events"
+	"github.com/yeixio/yggdrasil-core/internal/mimir"
 	"github.com/yeixio/yggdrasil-core/internal/models"
 	modelhealth "github.com/yeixio/yggdrasil-core/internal/models/health"
 	"github.com/yeixio/yggdrasil-core/internal/profiles"
@@ -62,10 +64,23 @@ func (a *App) RunChat(ctx context.Context, profileID, conversationID, message st
 		}
 		modelID = mid
 	}
+	special, err := a.resolveSpecialized(ctx, modelID)
+	if err != nil {
+		return nil, err
+	}
+	if special != nil {
+		modelID = special.baseModelID
+	}
 	if modelID != "" {
 		profile = withChatModel(profile, modelID)
 	}
 	profile = applyExecutionPolicy(profile, execution)
+	if special != nil {
+		// A specialized AI answers in the style it was trained on, without the
+		// tool protocol, on the computer that holds its adapter.
+		profile = withoutTools(profile)
+		execution = "local"
+	}
 	if execution == "automatic" && a.Models != nil {
 		installed, listErr := a.Models.List(ctx)
 		if listErr == nil {
@@ -123,6 +138,11 @@ func (a *App) RunChat(ctx context.Context, profileID, conversationID, message st
 			conversationID: conversationID,
 			taskID:         task.ID,
 			turnPrompt:     message,
+		}
+		if special != nil {
+			env.adapter = special.adapter
+			env.instructions = special.instructions
+			env.knowledge = special.knowledge
 		}
 		eventsCh, err := orch.Run(ctx, task, profile, env)
 		if err != nil {
@@ -615,6 +635,11 @@ type chatExecEnv struct {
 	conversationID string
 	taskID         string
 	turnPrompt     string
+	// adapter, instructions, and knowledge come from a specialized AI, on top
+	// of the profile.
+	adapter      string
+	instructions string
+	knowledge    []string
 
 	mu         sync.Mutex
 	lastModel  string
@@ -681,7 +706,7 @@ func (e *chatExecEnv) Generate(ctx context.Context, role string, messages []plug
 		"model_id": modelID, "node_id": nodeID, "role": role,
 		"node_name": e.app.nodeDisplayName(nodeID),
 	}))
-	ch, err := e.app.generateOnNode(ctx, nodeID, modelID, role, messages)
+	ch, err := e.app.generateOnNode(ctx, nodeID, modelID, role, e.adapter, messages)
 	if err != nil {
 		return nil, err
 	}
@@ -767,6 +792,13 @@ func (e *chatExecEnv) NodeForRole(role string) (string, error) {
 		e.mu.Unlock()
 		return id, nil
 	}
+	if e.adapter != "" && e.app.Config != nil {
+		// The adapter file lives here, so a specialized AI never leaves this computer.
+		local := e.app.Config.Get().NodeID
+		e.roleNodes[role] = local
+		e.mu.Unlock()
+		return local, nil
+	}
 	avoid := append([]string(nil), e.usedNodes...)
 	e.mu.Unlock()
 
@@ -809,6 +841,41 @@ func (e *chatExecEnv) modelForRole(role string) string {
 		}
 	}
 	return ""
+}
+
+// TurnInstructions adds connected knowledge for this turn. The simple
+// orchestrator places it ahead of its own system instructions.
+func (e *chatExecEnv) TurnInstructions(ctx context.Context, prompt string) string {
+	var parts []string
+	if strings.TrimSpace(e.instructions) != "" {
+		parts = append(parts, strings.TrimSpace(e.instructions))
+	}
+	if block := e.knowledgeBlock(ctx, prompt); block != "" {
+		parts = append(parts, block)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func (e *chatExecEnv) knowledgeBlock(ctx context.Context, prompt string) string {
+	ids := append(append([]string(nil), e.profile.KnowledgeSources...), e.knowledge...)
+	if len(ids) == 0 || e.app == nil || e.app.Mimir == nil {
+		return ""
+	}
+	hits, err := e.app.Mimir.Search(ctx, mimir.SearchInput{Query: prompt, SourceIDs: ids})
+	if err != nil {
+		e.Emit("knowledge.failed", map[string]any{"error": err.Error()})
+		return ""
+	}
+	names := []string{}
+	seen := map[string]bool{}
+	for _, h := range hits {
+		if !seen[h.SourceName] {
+			seen[h.SourceName] = true
+			names = append(names, h.SourceName)
+		}
+	}
+	e.Emit("knowledge.retrieved", map[string]any{"passages": len(hits), "sources": names})
+	return mimir.ContextBlock(hits, 0)
 }
 
 // ListNodesAdapter for task manager.

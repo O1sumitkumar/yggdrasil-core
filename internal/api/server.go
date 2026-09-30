@@ -21,7 +21,9 @@ import (
 	"github.com/yeixio/yggdrasil-core/internal/config"
 	"github.com/yeixio/yggdrasil-core/internal/events"
 	"github.com/yeixio/yggdrasil-core/internal/logs"
+	"github.com/yeixio/yggdrasil-core/internal/models"
 	"github.com/yeixio/yggdrasil-core/internal/runtimes"
+	"github.com/yeixio/yggdrasil-core/internal/training"
 	"github.com/yeixio/yggdrasil-core/internal/version"
 	"github.com/yeixio/yggdrasil-core/pkg/contracts"
 )
@@ -113,6 +115,10 @@ type Server struct {
 	deps   Dependencies
 	router *mux.Router
 	http   *http.Server
+
+	knowledge       KnowledgeService
+	training        *training.Service
+	trainingCatalog func() []models.CatalogEntry
 }
 
 // NewServer builds the API server.
@@ -204,6 +210,8 @@ func (s *Server) routes() {
 	api.HandleFunc("/conversations/{id}", s.handleUpdateConversation).Methods(http.MethodPatch)
 	api.HandleFunc("/conversations/{id}", s.handleDeleteConversation).Methods(http.MethodDelete)
 	api.HandleFunc("/events", s.handleSSE).Methods(http.MethodGet, http.MethodOptions)
+	s.knowledgeRoutes(api)
+	s.trainingRoutes(api)
 
 	if s.deps.OpenAI != nil {
 		s.router.HandleFunc("/v1/models", s.deps.OpenAI.HandleModels).Methods(http.MethodGet, http.MethodOptions)
