@@ -5,6 +5,7 @@ import { api } from '@/lib/api'
 import { realms } from '@/lib/realms'
 import { displayVersion } from '@/lib/appVersion'
 import { useUIStore } from '@/stores/uiStore'
+import { YggdrasilMark } from '@/components/ui/YggdrasilMark'
 
 const mainNav = [
   { to: '/chat', label: 'Chat' },
@@ -115,15 +116,8 @@ export function Sidebar() {
     <aside className="app-sidebar flex h-full min-h-0 w-[15.5rem] shrink-0 flex-col overflow-hidden border-r border-line/60 bg-sidebar">
       <div className="px-4 pb-3 pt-4">
         <div className="flex items-center gap-2.5">
+          <YggdrasilMark size={36} lore />
           <a href="/" className="brand flex min-w-0 flex-1 items-center gap-2.5 no-underline">
-            <img
-              src="/yggdrasil-mark.png"
-              alt=""
-              width={36}
-              height={36}
-              className="h-9 w-9 shrink-0 object-contain"
-              decoding="async"
-            />
             <div className="min-w-0 leading-none">
               <div className="flex items-center gap-2">
                 <p className="font-display text-xl font-semibold tracking-tight text-ink">
