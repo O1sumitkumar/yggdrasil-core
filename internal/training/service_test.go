@@ -2,12 +2,14 @@ package training
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,11 +21,13 @@ import (
 	"github.com/yeixio/yggdrasil-core/pkg/pluginapi"
 )
 
-type fakePython struct{ ensured int }
+type fakePython struct{ ensured atomic.Int32 }
 
-func (f *fakePython) Status(pyenv.Spec) pyenv.Status { return pyenv.Status{Installed: f.ensured > 0} }
+func (f *fakePython) Status(pyenv.Spec) pyenv.Status {
+	return pyenv.Status{Installed: f.ensured.Load() > 0}
+}
 func (f *fakePython) Ensure(ctx context.Context, spec pyenv.Spec, p pyenv.Progress) (string, error) {
-	f.ensured++
+	f.ensured.Add(1)
 	return "/fake/python", nil
 }
 func (f *fakePython) Env() []string { return nil }
@@ -122,12 +126,13 @@ func newHarness(t *testing.T, mode string) *harness {
 		Nodes: func(ctx context.Context) ([]Node, error) {
 			return []Node{{ID: "local", Name: "this Mac", Local: true, Online: true, Hardware: mac(64)}}, nil
 		},
-		Python:   h.py,
-		Trainers: []Trainer{h.trainer},
-		DataDir:  filepath.Join(dir, "training"),
-		HFHome:   filepath.Join(dir, "hf"),
-		LogsDir:  logs,
-		Generate: h.gen.fn,
+		Python:      h.py,
+		Trainers:    []Trainer{h.trainer},
+		DataDir:     filepath.Join(dir, "training"),
+		HFHome:      filepath.Join(dir, "hf"),
+		LogsDir:     logs,
+		Generate:    h.gen.fn,
+		LocalNodeID: "local",
 	})
 	return h
 }
@@ -197,11 +202,11 @@ func TestBuildTrainEvaluateDeploy(t *testing.T) {
 		t.Fatalf("ready plan = %+v", plan)
 	}
 
-	job, err := h.svc.StartTraining(ctx, ai.ID)
+	job, err := h.svc.StartTraining(ctx, ai.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.svc.StartTraining(ctx, ai.ID); !errors.Is(err, ErrConflict) {
+	if _, err := h.svc.StartTraining(ctx, ai.ID, ""); !errors.Is(err, ErrConflict) {
 		t.Fatalf("second start while training: %v", err)
 	}
 	job = waitJob(t, h, job.ID)
@@ -267,7 +272,7 @@ func TestBuildTrainEvaluateDeploy(t *testing.T) {
 	}
 
 	// Retraining creates revision 2; revision 1 stays deployed until 2 is.
-	job2, err := h.svc.StartTraining(ctx, ai.ID)
+	job2, err := h.svc.StartTraining(ctx, ai.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +303,7 @@ func TestDeployRequiresEvaluation(t *testing.T) {
 	if _, err := h.svc.AddMaterial(ctx, ai.ID, MaterialInput{Filename: "c.jsonl", Text: tireExamples(12)}); err != nil {
 		t.Fatal(err)
 	}
-	job, err := h.svc.StartTraining(ctx, ai.ID)
+	job, err := h.svc.StartTraining(ctx, ai.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +326,7 @@ func TestCancelCleansUp(t *testing.T) {
 	if _, err := h.svc.AddMaterial(ctx, ai.ID, MaterialInput{Filename: "c.jsonl", Text: tireExamples(12)}); err != nil {
 		t.Fatal(err)
 	}
-	job, err := h.svc.StartTraining(ctx, ai.ID)
+	job, err := h.svc.StartTraining(ctx, ai.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +353,7 @@ func TestCancelCleansUp(t *testing.T) {
 	}
 	// Training can start again.
 	h.trainer.mode = "ok"
-	if _, err := h.svc.StartTraining(ctx, ai.ID); err != nil {
+	if _, err := h.svc.StartTraining(ctx, ai.ID, ""); err != nil {
 		t.Fatalf("restart after cancel: %v", err)
 	}
 	h.svc.Wait()
@@ -361,7 +366,7 @@ func TestFailureIsReportedAndCleanedUp(t *testing.T) {
 	if _, err := h.svc.AddMaterial(ctx, ai.ID, MaterialInput{Filename: "c.jsonl", Text: tireExamples(12)}); err != nil {
 		t.Fatal(err)
 	}
-	job, _ := h.svc.StartTraining(ctx, ai.ID)
+	job, _ := h.svc.StartTraining(ctx, ai.ID, "")
 	job = waitJob(t, h, job.ID)
 	if job.State != StateFailed || !strings.Contains(job.Error, "out of memory") {
 		t.Fatalf("job = %+v", job)
@@ -441,4 +446,65 @@ func TestAddConversations(t *testing.T) {
 
 func searchInput(q string, ids []string) mimir.SearchInput {
 	return mimir.SearchInput{Query: q, SourceIDs: ids}
+}
+
+func TestAttachExistingKnowledge(t *testing.T) {
+	h := newHarness(t, "ok")
+	ctx := context.Background()
+	ai, _ := h.svc.CreateAI(ctx, CreateInput{Name: "Bot"})
+	src, err := h.kb.Create(ctx, mimir.CreateInput{Kind: mimir.KindText, Filename: "faq.md", Text: "Open 9 to 5."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := []string{src.ID, src.ID}
+	got, err := h.svc.UpdateAI(ctx, ai.ID, Patch{Knowledge: &ids})
+	if err != nil || len(got.Knowledge) != 1 || got.Knowledge[0] != src.ID {
+		t.Fatalf("attach: %+v %v", got.Knowledge, err)
+	}
+	bad := []string{"missing"}
+	if _, err := h.svc.UpdateAI(ctx, ai.ID, Patch{Knowledge: &bad}); !errors.Is(err, mimir.ErrNotFound) {
+		t.Fatalf("unknown source: %v", err)
+	}
+}
+
+func TestSpreadsheetMaterial(t *testing.T) {
+	h := newHarness(t, "ok")
+	ctx := context.Background()
+	ai, _ := h.svc.CreateAI(ctx, CreateInput{Name: "Bot"})
+	load := func(name string) string {
+		raw, err := os.ReadFile(filepath.Join("testdata", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return base64.StdEncoding.EncodeToString(raw)
+	}
+	faq, err := h.svc.AddMaterial(ctx, ai.ID, MaterialInput{Filename: "faq.xlsx", ContentBase64: load("faq.xlsx")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if faq.Use != UseTraining || faq.ExampleCount != 12 {
+		t.Fatalf("faq material = %+v", faq)
+	}
+	inv, err := h.svc.AddMaterial(ctx, ai.ID, MaterialInput{Filename: "inventory.xlsx", ContentBase64: load("inventory.xlsx")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv.Use != UseKnowledge || inv.KnowledgeSourceID == "" {
+		t.Fatalf("inventory material = %+v", inv)
+	}
+	hits, err := h.kb.Search(ctx, searchInput("price for 225/45R17", []string{inv.KnowledgeSourceID}))
+	if err != nil || len(hits) == 0 || !strings.Contains(hits[0].Body, "Price: 189.99") {
+		t.Fatalf("hits = %+v %v", hits, err)
+	}
+	if _, err := h.kb.Content(ctx, inv.KnowledgeSourceID); err == nil {
+		t.Fatal("a workbook copy must not be editable as text")
+	}
+	raw, err := os.ReadFile("../mimir/testdata/warranty.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := h.svc.AddMaterial(ctx, ai.ID, MaterialInput{Filename: "warranty.pdf", ContentBase64: base64.StdEncoding.EncodeToString(raw)})
+	if err != nil || doc.Use != UseKnowledge || doc.KnowledgeSourceID == "" {
+		t.Fatalf("pdf material = %+v %v", doc, err)
+	}
 }
