@@ -1419,6 +1419,10 @@ export interface ModelRating {
   shared: boolean
   shared_at?: string
   updated_at?: string
+  /** The shared rating includes how the model runs here. */
+  share_observations: boolean
+  /** How the model ran here in the last 30 days, exactly as sharing them would send. */
+  observations?: RatingObservations
   /** A good time to ask for a rating. */
   ask: boolean
   shares?: {
@@ -1426,6 +1430,17 @@ export interface ModelRating {
     model: { id: string; format: string; quantization: string; runtime: string; backend: string }
     hardware: { platform: string; architecture: string; vendor: string; family: string; memory_type: string; memory_bucket_gb: string }
   }
+}
+
+/** How a model ran on this computer in the last 30 days. */
+export interface RatingObservations {
+  tokens_per_second?: number
+  ttft_ms?: number
+  starts?: number
+  start_failures?: number
+  crashed?: boolean
+  out_of_memory?: boolean
+  context_band?: '0-8k' | '8-32k' | '32-128k' | '128k+'
 }
 
 /** One group of hardware's ratings of a model. */
@@ -1437,6 +1452,13 @@ export interface RatingStats {
   weighted_score: number
   confidence: 'limited' | 'early' | 'community'
   tags?: Partial<Record<RatingTag, number>>
+  /** Ratings that shared how the model runs. */
+  observed?: number
+  median_tokens_per_second?: number
+  median_ttft_ms?: number
+  successful_start_rate?: number
+  crash_rate?: number
+  out_of_memory_rate?: number
 }
 
 /** Everyone's ratings of the models here, by local model ID. */
