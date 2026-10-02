@@ -54,7 +54,18 @@ const ready = new Promise((resolve, reject) => {
   })
 })
 
+// A screen that does not become ready is loaded once more before the run
+// fails: on CI runners a screen occasionally stays blank for the whole wait.
 async function openScreen(page, screen) {
+  try {
+    await loadScreen(page, screen, false)
+  } catch {
+    console.error(`Loading ${screen.id} again`)
+    await loadScreen(page, screen, true)
+  }
+}
+
+async function loadScreen(page, screen, last) {
   const query = new URLSearchParams({ screenshot: '1', screen: screen.id })
   if (screen.query) {
     for (const [key, value] of new URLSearchParams(screen.query)) {
@@ -70,10 +81,26 @@ async function openScreen(page, screen) {
       { timeout: 30_000 },
     )
   } catch (error) {
-    const text = await page.locator('body').innerText().catch(() => '')
+    if (!last) throw error
+    const text = await page.locator('body').innerText({ timeout: 5_000 }).catch((e) => `(could not read the page: ${e.message})`)
     console.error(`Page text for ${screen.id}:\n${text.slice(0, 1200)}`)
+    console.error(`Page errors and console output for ${screen.id}:\n${pageLog.slice(-40).join('\n') || '(none)'}`)
+    await page.screenshot({ path: path.join(root, `screenshot-failed-${screen.id}.png`), timeout: 5_000 }).catch(() => {})
     throw error
   }
+}
+
+// Page errors and console warnings, printed when a screen does not become ready.
+const pageLog = []
+function watchPage(page) {
+  page.on('pageerror', (error) => pageLog.push(`pageerror: ${error.stack || error.message}`))
+  page.on('console', (message) => {
+    if (message.type() === 'error' || message.type() === 'warning') pageLog.push(`console.${message.type()}: ${message.text()}`)
+  })
+  page.on('requestfailed', (request) => pageLog.push(`request failed: ${request.url()} ${request.failure()?.errorText || ''}`))
+  page.on('response', (response) => {
+    if (response.status() >= 400) pageLog.push(`HTTP ${response.status()}: ${response.url()}`)
+  })
 }
 
 try {
@@ -92,6 +119,7 @@ try {
       if (name) document.documentElement.dataset.form = name
     }, layout)
     const page = await context.newPage()
+    watchPage(page)
     const outDir = form.readme ? readmeDir : path.join(root, 'screenshots/raw', form.id)
     await mkdir(outDir, { recursive: true })
     for (const screen of screens) {
