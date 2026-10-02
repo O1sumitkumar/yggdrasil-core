@@ -6,8 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Thi
 
 ## [Unreleased]
 
+### Added
+
+- Documentation for 1.4.0. New [Configuration](docs/configuration.md) (data directory layout, every `config.json` key, environment variable, and setting) and [Command line](docs/cli.md) (`yggdrasil-daemon` flags, the Linux systemd service, and every `yggctl` command) pages. The API reference now lists every route, grouped by area, and every event type. The user guide adds sections on memory, knowledge, tools, notifications, profiles, privacy, and diagnostics.
+
 ### Changed
 
+- Rewrote the architecture, privacy, and troubleshooting pages for 1.4.0, and updated tools, capabilities, compatibility, and the README. Removed statements that no longer matched the code, such as where retrieved knowledge goes in a prompt and which `/chat` fields exist.
 - Each release carries its own screenshots. After a release is published, the Screenshots workflow captures the README stills and the walkthrough from that release's interface and attaches them as `screenshot-<name>` files, which yggdrasil.yeix.io shows. Started by hand with a tag, it attaches them to an existing release.
 
 ## [1.4.0-beta.1] - 2026-10-01
