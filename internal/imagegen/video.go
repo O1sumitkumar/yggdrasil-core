@@ -141,6 +141,14 @@ func (e *Engine) GenerateVideo(ctx context.Context, req VideoRequest) (VideoResu
 		"--sampling-method", "euler", "-s", strconv.FormatInt(seed, 10), "-o", out,
 		"--offload-to-cpu", "--diffusion-fa",
 	}
+	if tae := files["tae"]; tae != "" {
+		// The tiny decoder turns the clip into frames in seconds.
+		args = append(args, "--tae", tae)
+	} else {
+		// The full VAE decodes every frame at once unless tiled, which
+		// needs more memory than most computers have.
+		args = append(args, "--vae-tiling", "--temporal-tiling")
+	}
 	if req.Image != nil {
 		ext := strings.ToLower(filepath.Ext(req.ImageName))
 		if ext != ".jpg" && ext != ".jpeg" {
