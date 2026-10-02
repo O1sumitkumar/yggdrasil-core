@@ -14,6 +14,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Thi
 - Planning: Always asks the planner model to split a request that has no obvious parts.
 - Placement rules per profile. Each paired computer can be Preferred or Never use, and Only this computer keeps every turn here.
 - Retry on another computer. When a model fails before showing anything, the turn runs again with the same model on another online computer that has it, before trying another model. Retries (1–3) sets how many times.
+- The network advertisement (`_localai._tcp`) now says where the API is, as `api_port` in its TXT record. The service's own port is the computer-to-computer port, so an app that finds Yggdrasil on the network, such as the iPhone app, had to assume the default API port.
 
 ### Changed
 
